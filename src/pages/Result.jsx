@@ -91,7 +91,8 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
     delete containerStyle.backgroundImage; 
   }
 
-const handleDownload = async () => {
+  // === FUNGSI DOWNLOAD BARU (ANTI GEPENG & MIRROR) ===
+  const handleDownload = async () => {
     if (!stripRef.current) return;
     setSelectedPhotoIdx(null); 
     setIsSaving(true);
@@ -101,18 +102,19 @@ const handleDownload = async () => {
       const originalElement = stripRef.current;
       clonedElement = originalElement.cloneNode(true);
 
-      // --- PERBAIKAN UTAMA: PAKSA LEBAR ASLI (ANTI GEPENG) ---
-      // Ambil lebar asli dari frames.js. Kalau gak ada, default 320px
+      // 1. PAKSA UKURAN ASLI DARI FRAMES.JS (JANGAN NGIKUTIN LAYAR HP)
       const realWidth = selectedFrame.width || '320px'; 
+      // Kalau frame bergambar (kayak polaroid), tinggi harus fix. Kalau polos, auto.
+      const realHeight = selectedFrame.height || 'auto';
 
       Object.assign(clonedElement.style, {
-        position: 'fixed',        // Lepas dari layout layar
+        position: 'fixed',        
         top: '0',                 
-        left: '-9999px',          // Umpetin jauh di kiri
-        width: realWidth,         // PAKSA UKURAN ASLI!
-        minWidth: realWidth,      // Pastiin gak nyusut
-        height: 'auto',           
-        transform: 'none',        // Hapus efek zoom/scale
+        left: '-9999px',          // Umpetin di luar layar
+        width: realWidth,         // KUNCI: Paksa lebar asli
+        minWidth: realWidth,      
+        height: realHeight,       
+        transform: 'none',        // KUNCI: Hapus zoom/scale dari HP
         margin: '0',
         padding: selectedFrame.isCustomPos ? '0' : '20px', 
         backgroundColor: selectedFrame.style.backgroundColor || 'white',
@@ -122,29 +124,31 @@ const handleDownload = async () => {
 
       document.body.appendChild(clonedElement);
 
-      // Tunggu browser nata ulang (layouting) kloningan
+      // Tunggu bentar biar browser nata ulang layoutnya
       await new Promise(resolve => setTimeout(resolve, 300));
 
+      // 2. CAPTURE
       const canvas = await html2canvas(clonedElement, {
         scale: 3,      // Resolusi Tinggi (HD)
-        useCORS: true, // Wajib buat Filter
+        useCORS: true, // WAJIB: Biar filter & gambar luar kebaca
         allowTaint: true,
         backgroundColor: null,
-        // Paksa canvas ukurannya sama kayak kloningan yang udah bener
         width: clonedElement.offsetWidth,
         height: clonedElement.offsetHeight,
         windowWidth: clonedElement.offsetWidth,
         windowHeight: clonedElement.offsetHeight,
         onclone: (doc) => {
-            // Trik Pancingan: Paksa browser nerapin filter ulang
-            const images = doc.getElementsByTagName('img');
-            for (let img of images) {
-                img.style.filter = img.style.filter; 
+            // HACK: Kadang filter gak nempel di Safari, kita pancing ulang
+            const divs = doc.getElementsByTagName('div');
+            for (let div of divs) {
+                if (div.style.filter) {
+                    div.style.filter = div.style.filter; 
+                }
             }
         }
       });
 
-      // Download pake Blob (Lebih aman buat Chrome/Safari)
+      // 3. SIMPAN (Pake Blob biar lebih stabil di Chrome Mobile)
       canvas.toBlob((blob) => {
         if (!blob) {
             alert("Gagal memproses gambar.");
@@ -178,26 +182,20 @@ const handleDownload = async () => {
     <div style={{ 
       display: 'flex', 
       width: '100vw', 
-      
-      // LOGIC PENTING:
-      // Desktop: Tinggi pas 1 layar, gak boleh scroll body (overflow hidden)
-      // Mobile: Tinggi 'auto' (bebas manjang), body boleh scroll (overflow visible)
       minHeight: 'calc(100vh - 80px)', 
       height: isMobile ? 'auto' : 'calc(100vh - 80px)', 
       overflow: isMobile ? 'visible' : 'hidden', 
-      
       fontFamily: 'sans-serif',
       flexDirection: isMobile ? 'column' : 'row',
       background: '#f8f9fa'
     }}>
       
-      {/* ================= PREVIEW AREA (ATAS) ================= */}
+      {/* ================= PREVIEW AREA ================= */}
       <div style={{ 
         flex: isMobile ? 'none' : 1, 
         width: '100%',
         height: isMobile ? 'auto' : '100%', 
         overflowY: isMobile ? 'visible' : 'auto', 
-        
         position: 'relative',
         backgroundColor: '#e9ecef',
         backgroundImage: 'radial-gradient(#adb5bd 1px, transparent 1px)',
@@ -208,7 +206,6 @@ const handleDownload = async () => {
         padding: isMobile ? '20px 0' : '0'
       }}>
         
-        {/* WRAPPER STRIP */}
         <div style={{ 
           margin: 'auto', 
           padding: '40px',
@@ -229,43 +226,51 @@ const handleDownload = async () => {
               border: selectedFrame.isImageFrame ? 'none' : '10px solid white',
             }}>
             
-            {/* Foto-foto */}
+            {/* --- LOOPING FOTO DENGAN FILTER YANG BENAR --- */}
             {displayPhotos.map((pic, i) => {
               const pos = selectedFrame.customPos ? selectedFrame.customPos[i] : null;
               const adj = photoAdjustments[i] || { zoom: 1, x: 0, y: 0, rotate: 0 }; 
               const isSelected = selectedPhotoIdx === i;
 
+              // STYLING WRAPPER FOTO
               const wrapperStyle = pos ? {
+                // KASUS 1: Custom Pos (Frame Bergambar)
                 position: 'absolute', top: pos.top, left: pos.left,
                 width: pos.width, height: pos.height, 
                 transform: `rotate(${pos.rotate || '0deg'})`,
                 borderRadius: '2px', overflow: 'hidden', zIndex: 10, cursor: 'pointer',
                 border: selectedFrame.isImageFrame ? 'none' : '4px solid white', boxSizing: 'border-box',
-                boxShadow: isSelected ? '0 0 0 4px #2196F3' : 'none', transition: 'all 0.2s'
+                boxShadow: isSelected ? '0 0 0 4px #2196F3' : 'none', transition: 'all 0.2s',
+                filter: activeFilter // <--- FILTER PINDAH KE DIV (Biar kebaca html2canvas)
               } : {
-                width: '100%', aspectRatio: '4/3', 
+                // KASUS 2: Frame Polos (Stack)
+                width: '100%', 
+                height: 0, 
+                paddingBottom: '75%', // Aspect Ratio 4:3 (Anti-Gepeng)
+                position: 'relative',
                 borderRadius: selectedFrame.style.borderRadius ? '4px' : '0',
                 marginBottom: i === displayPhotos.length -1 ? 0 : '10px',
                 overflow: 'hidden', zIndex: 10, cursor: 'pointer',
                 border: selectedFrame.isImageFrame ? 'none' : '5px solid white', boxSizing: 'border-box',
-                boxShadow: isSelected ? '0 0 0 4px #2196F3' : 'none', transition: 'all 0.2s'
+                boxShadow: isSelected ? '0 0 0 4px #2196F3' : 'none', transition: 'all 0.2s',
+                filter: activeFilter // <--- FILTER PINDAH KE DIV
               };
 
               return (
                 <div key={i} style={wrapperStyle} onClick={(e) => { e.stopPropagation(); setSelectedPhotoIdx(i); }}>
                   <img 
-  crossOrigin="anonymous" // <-- INI MANTRANYA! JANGAN LUPA!
-  src={pic} 
-  alt="photo" 
-  style={{ 
-    width: '100%', 
-    height: '100%', 
-    objectFit: 'cover', 
-    transform: `scale(${adj.zoom}) translate(${adj.x}px, ${adj.y}px) rotate(${adj.rotate}deg)`, 
-    filter: activeFilter, // Filter CSS ini bakal kebaca kalau ada crossOrigin
-    transition: 'filter 0.3s ease' 
-  }} 
-/>
+                    crossOrigin="anonymous" // <--- WAJIB BUAT IZIN AKSES GAMBAR
+                    src={pic} 
+                    alt="photo" 
+                    style={{ 
+                      // Kalau frame polos, img absolute biar ngisi padding hack
+                      position: pos ? 'static' : 'absolute', 
+                      top: 0, left: 0,
+                      width: '100%', height: '100%', objectFit: 'cover', 
+                      transform: `scale(${adj.zoom}) translate(${adj.x}px, ${adj.y}px) rotate(${adj.rotate}deg)`, 
+                      transition: 'filter 0.3s ease'
+                    }} 
+                  />
                 </div>
               );
             })}
@@ -292,17 +297,15 @@ const handleDownload = async () => {
         </div>
       </div>
 
-      {/* ================= CONTROLS AREA (BAWAH) ================= */}
+      {/* ================= CONTROLS AREA ================= */}
       <div style={{ 
         width: isMobile ? '100%' : '380px', 
-        height: isMobile ? 'auto' : '100%', // Di HP tinggi otomatis manjang
-        
+        height: isMobile ? 'auto' : '100%', 
         background: 'white', 
         borderLeft: isMobile ? 'none' : '1px solid #ddd', 
         borderTop: isMobile ? '1px solid #ddd' : 'none',
-        
         display: 'flex', flexDirection: 'column', 
-        padding: '20px 30px 40px 30px', // Padding bawah gedean dikit
+        padding: '20px 30px 40px 30px', 
         zIndex: 50, 
         boxShadow: '-5px 0 20px rgba(0,0,0,0.05)',
       }}>
@@ -314,10 +317,7 @@ const handleDownload = async () => {
           </div>
         )}
 
-        {/* --- DYNAMIC CONTENT (Filter/Edit) --- */}
-        {/* Hapus max-height atau overflow biar manjang ke bawah */}
         <div style={{ flex: 1, marginBottom: '20px' }}>
-            
             {selectedPhotoIdx !== null && photoAdjustments[selectedPhotoIdx] ? (
               // MODE EDIT
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -354,12 +354,7 @@ const handleDownload = async () => {
                 <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'10px', color:'#333', fontWeight:'bold', fontSize:'0.9rem' }}>
                   <Wand size={16} fill="orange" color="orange" /><span>FILTER EFEK</span>
                 </div>
-                {/* GRID FILTER: Biarin auto height */}
-                <div style={{ 
-                    display: 'grid', 
-                    gridTemplateColumns: 'repeat(2, 1fr)', 
-                    gap: '8px'
-                }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
                   {filterOptions.map((filter, idx) => (
                     <button key={idx} onClick={() => setActiveFilter(filter.value)} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px', background: activeFilter === filter.value ? '#333' : 'white', border: '1px solid #eee', borderRadius: '8px', cursor: 'pointer' }}>
                       <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: filter.color, border: '1px solid #ddd' }} />
@@ -371,14 +366,12 @@ const handleDownload = async () => {
             )}
         </div>
 
-        {/* --- FOOTER BUTTONS --- */}
         <div style={{ 
           marginTop: 'auto', 
           paddingTop: '20px', 
           borderTop: '1px solid #eee',
           display: 'flex', 
           gap: '10px',
-          // Padding bottom ekstra buat HP biar ga mepet ujung layar
           paddingBottom: isMobile ? '20px' : '0' 
         }}>
           <button onClick={onRetake} disabled={isSaving} style={{ flex: 1, background: 'white', color: '#555', border: '2px solid #eee', padding: '15px', borderRadius: '10px', fontWeight: 'bold', fontSize: '0.9rem', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '5px' }}>
