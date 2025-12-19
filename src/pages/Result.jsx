@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import html2canvas from 'html2canvas';
+import { toPng } from 'html-to-image'; // <--- LIBRARY BARU
 import { 
   Heart, Star, Sparkles, Music, Cloud, Sun, Moon, 
   Zap, Smile, Flower, Anchor, Camera, Film,
@@ -91,7 +91,7 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
     delete containerStyle.backgroundImage; 
   }
 
-  // === FUNGSI DOWNLOAD BARU (ANTI GEPENG & MIRROR) ===
+  // === FUNGSI DOWNLOAD BARU (Pake html-to-image) ===
   const handleDownload = async () => {
     if (!stripRef.current) return;
     setSelectedPhotoIdx(null); 
@@ -102,19 +102,18 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
       const originalElement = stripRef.current;
       clonedElement = originalElement.cloneNode(true);
 
-      // 1. PAKSA UKURAN ASLI DARI FRAMES.JS (JANGAN NGIKUTIN LAYAR HP)
+      // 1. PAKSA UKURAN ASLI (Anti Gepeng Logic)
       const realWidth = selectedFrame.width || '320px'; 
-      // Kalau frame bergambar (kayak polaroid), tinggi harus fix. Kalau polos, auto.
       const realHeight = selectedFrame.height || 'auto';
 
       Object.assign(clonedElement.style, {
         position: 'fixed',        
         top: '0',                 
-        left: '-9999px',          // Umpetin di luar layar
-        width: realWidth,         // KUNCI: Paksa lebar asli
+        left: '-9999px',          // Umpetin
+        width: realWidth,         // PAKSA LEBAR ASLI
         minWidth: realWidth,      
-        height: realHeight,       
-        transform: 'none',        // KUNCI: Hapus zoom/scale dari HP
+        height: realHeight,       // PAKSA TINGGI ASLI (Penting buat polaroid)
+        transform: 'none',        // Hapus scale mobile
         margin: '0',
         padding: selectedFrame.isCustomPos ? '0' : '20px', 
         backgroundColor: selectedFrame.style.backgroundColor || 'white',
@@ -124,48 +123,29 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
 
       document.body.appendChild(clonedElement);
 
-      // Tunggu bentar biar browser nata ulang layoutnya
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // Tunggu browser nata ulang
+      await new Promise(resolve => setTimeout(resolve, 500)); // Kasih waktu agak lamaan dikit
 
-      // 2. CAPTURE
-      const canvas = await html2canvas(clonedElement, {
-        scale: 3,      // Resolusi Tinggi (HD)
-        useCORS: true, // WAJIB: Biar filter & gambar luar kebaca
-        allowTaint: true,
+      // 2. CAPTURE PAKE LIBRARY BARU
+      const dataUrl = await toPng(clonedElement, {
+        cacheBust: true, // Paksa refresh gambar (biar filter update)
+        pixelRatio: 3,   // HD Quality (Setara scale: 3)
+        quality: 1.0,
         backgroundColor: null,
-        width: clonedElement.offsetWidth,
+        // Pastikan ukuran canvas pas dengan elemen asli
+        width: clonedElement.offsetWidth, 
         height: clonedElement.offsetHeight,
-        windowWidth: clonedElement.offsetWidth,
-        windowHeight: clonedElement.offsetHeight,
-        onclone: (doc) => {
-            // HACK: Kadang filter gak nempel di Safari, kita pancing ulang
-            const divs = doc.getElementsByTagName('div');
-            for (let div of divs) {
-                if (div.style.filter) {
-                    div.style.filter = div.style.filter; 
-                }
-            }
-        }
       });
 
-      // 3. SIMPAN (Pake Blob biar lebih stabil di Chrome Mobile)
-      canvas.toBlob((blob) => {
-        if (!blob) {
-            alert("Gagal memproses gambar.");
-            setIsSaving(false);
-            return;
-        }
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `MEMORIA-${Date.now()}.png`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        
-        setTimeout(() => { setIsSaving(false); onFinish(); }, 500);
-      }, 'image/png', 1.0);
+      // 3. DOWNLOAD
+      const link = document.createElement("a");
+      link.download = `MEMORIA-${Date.now()}.png`;
+      link.href = dataUrl;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      setTimeout(() => { setIsSaving(false); onFinish(); }, 500);
 
     } catch (error) {
       console.error("Gagal save:", error); 
@@ -226,44 +206,41 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
               border: selectedFrame.isImageFrame ? 'none' : '10px solid white',
             }}>
             
-            {/* --- LOOPING FOTO DENGAN FILTER YANG BENAR --- */}
             {displayPhotos.map((pic, i) => {
               const pos = selectedFrame.customPos ? selectedFrame.customPos[i] : null;
               const adj = photoAdjustments[i] || { zoom: 1, x: 0, y: 0, rotate: 0 }; 
               const isSelected = selectedPhotoIdx === i;
 
-              // STYLING WRAPPER FOTO
               const wrapperStyle = pos ? {
-                // KASUS 1: Custom Pos (Frame Bergambar)
+                // KASUS 1: Frame Bergambar
                 position: 'absolute', top: pos.top, left: pos.left,
                 width: pos.width, height: pos.height, 
                 transform: `rotate(${pos.rotate || '0deg'})`,
                 borderRadius: '2px', overflow: 'hidden', zIndex: 10, cursor: 'pointer',
                 border: selectedFrame.isImageFrame ? 'none' : '4px solid white', boxSizing: 'border-box',
                 boxShadow: isSelected ? '0 0 0 4px #2196F3' : 'none', transition: 'all 0.2s',
-                filter: activeFilter // <--- FILTER PINDAH KE DIV (Biar kebaca html2canvas)
+                filter: activeFilter 
               } : {
-                // KASUS 2: Frame Polos (Stack)
+                // KASUS 2: Frame Polos (Padding Hack)
                 width: '100%', 
                 height: 0, 
-                paddingBottom: '75%', // Aspect Ratio 4:3 (Anti-Gepeng)
+                paddingBottom: '75%', 
                 position: 'relative',
                 borderRadius: selectedFrame.style.borderRadius ? '4px' : '0',
                 marginBottom: i === displayPhotos.length -1 ? 0 : '10px',
                 overflow: 'hidden', zIndex: 10, cursor: 'pointer',
                 border: selectedFrame.isImageFrame ? 'none' : '5px solid white', boxSizing: 'border-box',
                 boxShadow: isSelected ? '0 0 0 4px #2196F3' : 'none', transition: 'all 0.2s',
-                filter: activeFilter // <--- FILTER PINDAH KE DIV
+                filter: activeFilter
               };
 
               return (
                 <div key={i} style={wrapperStyle} onClick={(e) => { e.stopPropagation(); setSelectedPhotoIdx(i); }}>
                   <img 
-                    crossOrigin="anonymous" // <--- WAJIB BUAT IZIN AKSES GAMBAR
+                    crossOrigin="anonymous" 
                     src={pic} 
                     alt="photo" 
                     style={{ 
-                      // Kalau frame polos, img absolute biar ngisi padding hack
                       position: pos ? 'static' : 'absolute', 
                       top: 0, left: 0,
                       width: '100%', height: '100%', objectFit: 'cover', 
