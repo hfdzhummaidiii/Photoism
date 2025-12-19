@@ -52,9 +52,11 @@ const filterOptions = [
 const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) => {
   const [activeFilter, setActiveFilter] = useState(filterOptions[0].value);
   const [isSaving, setIsSaving] = useState(false);
-  const stripRef = useRef(null);
   
-  // Deteksi Mobile
+  // KITA PAKE 2 REF: SATU BUAT PREVIEW, SATU BUAT EXPORT (GHOST)
+  const stripRef = useRef(null);
+  const exportRef = useRef(null); 
+  
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -91,72 +93,42 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
     delete containerStyle.backgroundImage; 
   }
 
-  // === FUNGSI DOWNLOAD FINAL (FIX BLANK & NO REDIRECT) ===
+  // === FUNGSI DOWNLOAD BARU (Pake Ghost Strip) ===
   const handleDownload = async () => {
-    if (!stripRef.current) return;
+    // Kita capture exportRef (yang tersembunyi), BUKAN stripRef (yang di layar)
+    if (!exportRef.current) return;
     setSelectedPhotoIdx(null); 
     setIsSaving(true);
-    let clonedElement = null;
+    
+    // Overlay loading manual
+    const loadingOverlay = document.createElement('div');
+    Object.assign(loadingOverlay.style, {
+      position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+      backgroundColor: 'rgba(255,255,255,0.9)', zIndex: '10001', 
+      display: 'flex', flexDirection:'column', alignItems: 'center', justifyContent: 'center',
+      color: '#333', fontWeight: 'bold', fontSize: '1.2rem'
+    });
+    loadingOverlay.innerHTML = '<span>Sedang Menyimpan...</span><span style="font-size:0.8rem; margin-top:5px">Tunggu sebentar ya!</span>';
+    document.body.appendChild(loadingOverlay);
 
     try {
-      const originalElement = stripRef.current;
-      clonedElement = originalElement.cloneNode(true);
+      // Tunggu dikit biar user liat loading
+      await new Promise(resolve => setTimeout(resolve, 500));
 
-      // 1. STYLE UNTUK EXPORT (ANTI GEPENG & ANTI BLANK)
-      const realWidth = selectedFrame.width || '320px'; 
-      const realHeight = selectedFrame.height || 'auto';
-
-      Object.assign(clonedElement.style, {
-        position: 'fixed',        
-        top: '0',                 
-        left: '0',                // JANGAN PAKE -9999px (Penyebab Blank di HP)
-        width: realWidth,         
-        minWidth: realWidth,      
-        height: realHeight,       
-        transform: 'none',        
-        margin: '0',
-        padding: selectedFrame.isCustomPos ? '0' : '20px', 
-        backgroundColor: selectedFrame.style.backgroundColor || 'white',
-        zIndex: '-9999',          // Taruh di belakang layar biar gak ganggu
-        borderRadius: '0',
-        visibility: 'visible'     // Pastikan visible biar dirender browser
-      });
-
-      // 2. RENDER KE DOM
-      document.body.appendChild(clonedElement);
-
-      // 3. PRELOAD IMAGE (WAJIB BUAT HP BIAR GAK BLANK)
-      // Kita tunggu sampe semua gambar di dalam kloningan beneran ke-load
-      const images = clonedElement.getElementsByTagName('img');
-      const imagePromises = Array.from(images).map(img => {
-        if (img.complete) return Promise.resolve();
-        return new Promise(resolve => {
-           img.onload = resolve;
-           img.onerror = resolve; 
-        });
-      });
-      await Promise.all(imagePromises);
-
-      // Tunggu extra 1 detik biar frame background & filter mateng
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // 4. CAPTURE
+      // CAPTURE STRIP YANG TERSEMBUNYI (Ghost)
+      // Karena dia udah nempel di DOM dari awal, gambarnya pasti udah ke-load!
       const isSmallScreen = window.innerWidth < 768;
-      const dataUrl = await toPng(clonedElement, {
-        cacheBust: false, // <--- JANGAN TRUE! INI BIANG KEROKNYA DI HP
+      
+      const dataUrl = await toPng(exportRef.current, {
+        cacheBust: false,  // PENTING: False buat HP
         pixelRatio: isSmallScreen ? 2 : 3, 
         quality: 1.0,
         backgroundColor: null,
-        width: clonedElement.offsetWidth, 
-        height: clonedElement.offsetHeight,
-        skipFonts: true, // Biar enteng
-        filter: (node) => {
-          // Filter tambahan biar gak ada elemen aneh yang ikut ke-render
-          return node.tagName !== 'LINK' && node.tagName !== 'SCRIPT';
-        }
+        // Kita gak perlu set width/height manual, karena exportRef udah diset ukurannya via CSS di bawah
+        skipFonts: true, 
       });
 
-      // 5. DOWNLOAD
+      // DOWNLOAD
       const link = document.createElement("a");
       link.download = `MEMORIA-${Date.now()}.png`;
       link.href = dataUrl;
@@ -164,22 +136,105 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
       link.click();
       document.body.removeChild(link);
       
-      // 6. FINISH (TAPI GAK PINDAH HALAMAN)
       setTimeout(() => { 
         setIsSaving(false); 
-        // onFinish(); <--- INI GUA HAPUS BIAR TETEP DI SINI
       }, 500);
 
     } catch (error) {
       console.error("Gagal save:", error); 
       setIsSaving(false); 
-      alert("Gagal menyimpan. Coba refresh browser.");
+      alert("Gagal menyimpan. Coba refresh dan ulangi.");
     } finally {
-      if (clonedElement && document.body.contains(clonedElement)) {
-        document.body.removeChild(clonedElement);
+      if (document.body.contains(loadingOverlay)) {
+        document.body.removeChild(loadingOverlay);
       }
     }
   };
+
+  // --- COMPONENT RENDERER (Biar gak ngulang kodingan) ---
+  // Ini fungsi buat ngerender isi strip, dipake 2 kali (Preview & Ghost)
+  const renderStripContent = (forExport = false) => (
+    <>
+      <div className="strip-content-wrapper" style={{
+          ...containerStyle,
+          // Kalau export, paksa ukuran asli. Kalau preview, responsif (via CSS parent)
+          width: forExport ? (selectedFrame.width || '320px') : '100%', 
+          height: forExport ? (selectedFrame.height || 'auto') : '100%',
+          
+          position: 'relative', 
+          padding: selectedFrame.isCustomPos ? '0' : '20px',
+          display: selectedFrame.isCustomPos ? 'block' : 'flex', flexDirection: 'column',
+          gap: '15px', boxSizing: 'border-box', 
+          boxShadow: forExport ? 'none' : '0 20px 50px -10px rgba(0,0,0,0.3)', 
+          backgroundColor: selectedFrame.style.backgroundColor || 'white',
+          border: selectedFrame.isImageFrame ? 'none' : '10px solid white',
+          // Hapus scale transform buat export
+          transform: 'none',
+        }}>
+        
+        {displayPhotos.map((pic, i) => {
+          const pos = selectedFrame.customPos ? selectedFrame.customPos[i] : null;
+          const adj = photoAdjustments[i] || { zoom: 1, x: 0, y: 0, rotate: 0 }; 
+          const isSelected = !forExport && selectedPhotoIdx === i; // Export gak boleh ada highlight
+
+          const wrapperStyle = pos ? {
+            position: 'absolute', top: pos.top, left: pos.left,
+            width: pos.width, height: pos.height, 
+            transform: `rotate(${pos.rotate || '0deg'})`,
+            borderRadius: '2px', overflow: 'hidden', zIndex: 10, cursor: forExport ? 'default' : 'pointer',
+            border: selectedFrame.isImageFrame ? 'none' : '4px solid white', boxSizing: 'border-box',
+            boxShadow: isSelected ? '0 0 0 4px #2196F3' : 'none', 
+            filter: activeFilter 
+          } : {
+            width: '100%', height: 0, paddingBottom: '75%', position: 'relative',
+            borderRadius: selectedFrame.style.borderRadius ? '4px' : '0',
+            marginBottom: i === displayPhotos.length -1 ? 0 : '10px',
+            overflow: 'hidden', zIndex: 10, cursor: forExport ? 'default' : 'pointer',
+            border: selectedFrame.isImageFrame ? 'none' : '5px solid white', boxSizing: 'border-box',
+            boxShadow: isSelected ? '0 0 0 4px #2196F3' : 'none', 
+            filter: activeFilter
+          };
+
+          return (
+            <div key={i} style={wrapperStyle} onClick={(e) => { 
+                if(!forExport) { e.stopPropagation(); setSelectedPhotoIdx(i); }
+            }}>
+              <img 
+                crossOrigin="anonymous" 
+                src={pic} 
+                alt="photo" 
+                style={{ 
+                  position: pos ? 'static' : 'absolute', 
+                  top: 0, left: 0,
+                  width: '100%', height: '100%', objectFit: 'cover', 
+                  transform: `scale(${adj.zoom}) translate(${adj.x}px, ${adj.y}px) rotate(${adj.rotate}deg)`, 
+                }} 
+              />
+            </div>
+          );
+        })}
+
+        {selectedFrame.isImageFrame && (
+          <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundImage: selectedFrame.style.backgroundImage, backgroundSize: '100% 100%', pointerEvents: 'none', zIndex: 20 }} />
+        )}
+
+        {selectedFrame.stickers && selectedFrame.stickers.map((stk, idx) => {
+          if (stk.isIcon && StickerMap[stk.icon]) {
+            const IconComponent = StickerMap[stk.icon];
+            return (
+              <div key={idx} style={{ position: 'absolute', ...stk.style, zIndex: 50, pointerEvents: 'none', display: 'flex' }}>
+                <IconComponent color={stk.color} fill={stk.fill} size={stk.size} />
+              </div>
+            );
+          } return null;
+        })}
+        
+        {!selectedFrame.isImageFrame && (
+            <div style={{ textAlign:'center', fontWeight:'900', fontSize:'0.7rem', color: selectedFrame.textColor, marginTop: '10px', zIndex: 15, letterSpacing:'2px' }}>MEMORIA</div>
+        )}
+      </div>
+    </>
+  );
 
   return (
     <div style={{ 
@@ -193,121 +248,32 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
       background: '#f8f9fa'
     }}>
       
-      {/* ================= PREVIEW AREA ================= */}
+      {/* ================= 1. PREVIEW AREA (YANG DILIHAT USER) ================= */}
       <div style={{ 
-        flex: isMobile ? 'none' : 1, 
-        width: '100%',
-        height: isMobile ? 'auto' : '100%', 
-        overflowY: isMobile ? 'visible' : 'auto', 
-        position: 'relative',
-        backgroundColor: '#e9ecef',
-        backgroundImage: 'radial-gradient(#adb5bd 1px, transparent 1px)',
-        backgroundSize: '20px 20px',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
+        flex: isMobile ? 'none' : 1, width: '100%', height: isMobile ? 'auto' : '100%', 
+        overflowY: isMobile ? 'visible' : 'auto', position: 'relative',
+        backgroundColor: '#e9ecef', backgroundImage: 'radial-gradient(#adb5bd 1px, transparent 1px)',
+        backgroundSize: '20px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center',
         padding: isMobile ? '20px 0' : '0'
       }}>
-        
         <div style={{ 
-          margin: 'auto', 
-          padding: '40px',
-          transform: isMobile ? 'scale(0.85)' : 'none', 
-          transformOrigin: 'center center'
+          margin: 'auto', padding: '40px',
+          transform: isMobile ? 'scale(0.85)' : 'none', transformOrigin: 'center center'
         }}>
-          <div ref={stripRef} className="final-strip" style={{
-              ...containerStyle,
-              width: selectedFrame.width || '300px', 
-              height: selectedFrame.height || 'auto',
-              position: 'relative', 
-              padding: selectedFrame.isCustomPos ? '0' : '20px',
-              display: selectedFrame.isCustomPos ? 'block' : 'flex', flexDirection: 'column',
-              gap: '15px', boxSizing: 'border-box', 
-              boxShadow: '0 20px 50px -10px rgba(0,0,0,0.3)', 
-              transform: 'scale(1)', 
-              backgroundColor: selectedFrame.style.backgroundColor || 'white',
-              border: selectedFrame.isImageFrame ? 'none' : '10px solid white',
-            }}>
-            
-            {displayPhotos.map((pic, i) => {
-              const pos = selectedFrame.customPos ? selectedFrame.customPos[i] : null;
-              const adj = photoAdjustments[i] || { zoom: 1, x: 0, y: 0, rotate: 0 }; 
-              const isSelected = selectedPhotoIdx === i;
-
-              const wrapperStyle = pos ? {
-                // KASUS 1: Frame Bergambar
-                position: 'absolute', top: pos.top, left: pos.left,
-                width: pos.width, height: pos.height, 
-                transform: `rotate(${pos.rotate || '0deg'})`,
-                borderRadius: '2px', overflow: 'hidden', zIndex: 10, cursor: 'pointer',
-                border: selectedFrame.isImageFrame ? 'none' : '4px solid white', boxSizing: 'border-box',
-                boxShadow: isSelected ? '0 0 0 4px #2196F3' : 'none', transition: 'all 0.2s',
-                filter: activeFilter 
-              } : {
-                // KASUS 2: Frame Polos (Padding Hack)
-                width: '100%', 
-                height: 0, 
-                paddingBottom: '75%', 
-                position: 'relative',
-                borderRadius: selectedFrame.style.borderRadius ? '4px' : '0',
-                marginBottom: i === displayPhotos.length -1 ? 0 : '10px',
-                overflow: 'hidden', zIndex: 10, cursor: 'pointer',
-                border: selectedFrame.isImageFrame ? 'none' : '5px solid white', boxSizing: 'border-box',
-                boxShadow: isSelected ? '0 0 0 4px #2196F3' : 'none', transition: 'all 0.2s',
-                filter: activeFilter
-              };
-
-              return (
-                <div key={i} style={wrapperStyle} onClick={(e) => { e.stopPropagation(); setSelectedPhotoIdx(i); }}>
-                  <img 
-                    crossOrigin="anonymous" 
-                    src={pic} 
-                    alt="photo" 
-                    style={{ 
-                      position: pos ? 'static' : 'absolute', 
-                      top: 0, left: 0,
-                      width: '100%', height: '100%', objectFit: 'cover', 
-                      transform: `scale(${adj.zoom}) translate(${adj.x}px, ${adj.y}px) rotate(${adj.rotate}deg)`, 
-                      transition: 'filter 0.3s ease'
-                    }} 
-                  />
-                </div>
-              );
-            })}
-
-            {selectedFrame.isImageFrame && (
-              <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundImage: selectedFrame.style.backgroundImage, backgroundSize: '100% 100%', pointerEvents: 'none', zIndex: 20 }} />
-            )}
-
-            {selectedFrame.stickers && selectedFrame.stickers.map((stk, idx) => {
-              if (stk.isIcon && StickerMap[stk.icon]) {
-                const IconComponent = StickerMap[stk.icon];
-                return (
-                  <div key={idx} style={{ position: 'absolute', ...stk.style, zIndex: 50, pointerEvents: 'none', display: 'flex' }}>
-                    <IconComponent color={stk.color} fill={stk.fill} size={stk.size} />
-                  </div>
-                );
-              } return null;
-            })}
-            
-            {!selectedFrame.isImageFrame && (
-                <div style={{ textAlign:'center', fontWeight:'900', fontSize:'0.7rem', color: selectedFrame.textColor, marginTop: '10px', zIndex: 15, letterSpacing:'2px' }}>MEMORIA</div>
-            )}
+          {/* RENDER STRIP PREVIEW */}
+          <div ref={stripRef} style={{ width: selectedFrame.width || '300px' }}>
+             {renderStripContent(false)}
           </div>
         </div>
       </div>
 
-      {/* ================= CONTROLS AREA ================= */}
+      {/* ================= 2. CONTROLS AREA ================= */}
       <div style={{ 
-        width: isMobile ? '100%' : '380px', 
-        height: isMobile ? 'auto' : '100%', 
-        background: 'white', 
-        borderLeft: isMobile ? 'none' : '1px solid #ddd', 
+        width: isMobile ? '100%' : '380px', height: isMobile ? 'auto' : '100%', 
+        background: 'white', borderLeft: isMobile ? 'none' : '1px solid #ddd', 
         borderTop: isMobile ? '1px solid #ddd' : 'none',
-        display: 'flex', flexDirection: 'column', 
-        padding: '20px 30px 40px 30px', 
-        zIndex: 50, 
-        boxShadow: '-5px 0 20px rgba(0,0,0,0.05)',
+        display: 'flex', flexDirection: 'column', padding: '20px 30px 40px 30px', 
+        zIndex: 50, boxShadow: '-5px 0 20px rgba(0,0,0,0.05)',
       }}>
         
         {!isMobile && (
@@ -325,11 +291,9 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
                   <span style={{ fontWeight:'bold', fontSize:'0.9rem' }}>EDIT FOTO #{selectedPhotoIdx + 1}</span>
                   <button onClick={() => setSelectedPhotoIdx(null)} style={{ background:'#eee', border:'none', borderRadius:'50%', padding:'5px', cursor:'pointer' }}><X size={16} /></button>
                 </div>
-
                 <button onClick={() => { if (onRetakeSingle) onRetakeSingle(selectedPhotoIdx); }} style={{ width: '100%', padding: '10px', background: '#FFEBEE', color: '#D32F2F', border: '1px solid #FFCDD2', borderRadius: '8px', fontWeight: 'bold', fontSize: '0.8rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
                   <Camera size={14} /> RETAKE
                 </button>
-
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                   {[
                     { label: 'ZOOM', icon: ZoomIn, key: 'zoom', min: 0.5, max: 3, step: 0.1 },
@@ -345,7 +309,6 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
                     </div>
                   ))}
                 </div>
-                
                 <button onClick={() => setSelectedPhotoIdx(null)} style={{ width: '100%', padding: '10px', background: '#333', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>SELESAI</button>
               </div>
             ) : (
@@ -366,22 +329,31 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
             )}
         </div>
 
-        <div style={{ 
-          marginTop: 'auto', 
-          paddingTop: '20px', 
-          borderTop: '1px solid #eee',
-          display: 'flex', 
-          gap: '10px',
-          paddingBottom: isMobile ? '20px' : '0' 
-        }}>
+        <div style={{ marginTop: 'auto', paddingTop: '20px', borderTop: '1px solid #eee', display: 'flex', gap: '10px', paddingBottom: isMobile ? '20px' : '0' }}>
           <button onClick={onRetake} disabled={isSaving} style={{ flex: 1, background: 'white', color: '#555', border: '2px solid #eee', padding: '15px', borderRadius: '10px', fontWeight: 'bold', fontSize: '0.9rem', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '5px' }}>
             <RefreshCcw size={16} /> ULANG
           </button>
-
           <button onClick={handleDownload} disabled={isSaving} style={{ flex: 1.5, background: isSaving ? '#ccc' : '#FFD54F', color: '#000', border: 'none', padding: '15px', borderRadius: '10px', fontWeight: '900', fontSize: '0.9rem', cursor: isSaving ? 'wait' : 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '5px' }}>
             {isSaving ? <Loader className="spin" size={18} /> : <Check size={18} />} SIMPAN
           </button>
         </div>
+      </div>
+
+      {/* ================= 3. GHOST STRIP (HIDDEN TAPI RENDERED) ================= */}
+      {/* Ini strip rahasia yang bakal di-capture. Dia sembunyi di belakang background (-10) */}
+      <div 
+        ref={exportRef} 
+        style={{
+          position: 'fixed', 
+          top: 0, left: 0, 
+          zIndex: -10, // Sembunyi di belakang
+          width: selectedFrame.width || '320px', // Paksa ukuran asli
+          // Pastikan dia visible secara DOM biar gambarnya ke-load
+          visibility: 'visible',
+          pointerEvents: 'none'
+        }}
+      >
+        {renderStripContent(true)}
       </div>
 
       <style>{`
