@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { toPng } from 'html-to-image'; // <--- LIBRARY BARU
+import { toPng } from 'html-to-image';
 import { 
   Heart, Star, Sparkles, Music, Cloud, Sun, Moon, 
   Zap, Smile, Flower, Anchor, Camera, Film,
@@ -91,7 +91,7 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
     delete containerStyle.backgroundImage; 
   }
 
-  // === FUNGSI DOWNLOAD BARU (Pake html-to-image) ===
+  // === FUNGSI DOWNLOAD FINAL (FIX BLANK & NO REDIRECT) ===
   const handleDownload = async () => {
     if (!stripRef.current) return;
     setSelectedPhotoIdx(null); 
@@ -102,42 +102,55 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
       const originalElement = stripRef.current;
       clonedElement = originalElement.cloneNode(true);
 
-      // 1. PAKSA UKURAN ASLI (Anti Gepeng Logic)
+      // 1. STYLE UNTUK EXPORT (ANTI GEPENG & ANTI BLANK)
       const realWidth = selectedFrame.width || '320px'; 
       const realHeight = selectedFrame.height || 'auto';
 
       Object.assign(clonedElement.style, {
         position: 'fixed',        
         top: '0',                 
-        left: '-9999px',          // Umpetin
-        width: realWidth,         // PAKSA LEBAR ASLI
+        left: '0',                // JANGAN PAKE -9999px (Penyebab Blank di HP)
+        width: realWidth,         
         minWidth: realWidth,      
-        height: realHeight,       // PAKSA TINGGI ASLI (Penting buat polaroid)
-        transform: 'none',        // Hapus scale mobile
+        height: realHeight,       
+        transform: 'none',        
         margin: '0',
         padding: selectedFrame.isCustomPos ? '0' : '20px', 
         backgroundColor: selectedFrame.style.backgroundColor || 'white',
-        zIndex: '-1000',
-        borderRadius: '0' 
+        zIndex: '-9999',          // Taruh di belakang layar biar gak ganggu
+        borderRadius: '0',
+        visibility: 'visible'     // Pastikan visible biar dirender browser
       });
 
+      // 2. RENDER KE DOM
       document.body.appendChild(clonedElement);
 
-      // Tunggu browser nata ulang
-      await new Promise(resolve => setTimeout(resolve, 500)); // Kasih waktu agak lamaan dikit
+      // 3. PRELOAD IMAGE (WAJIB BUAT HP BIAR GAK BLANK)
+      // Kita tunggu sampe semua gambar di dalam kloningan beneran ke-load
+      const images = clonedElement.getElementsByTagName('img');
+      const imagePromises = Array.from(images).map(img => {
+        if (img.complete) return Promise.resolve();
+        return new Promise(resolve => {
+           img.onload = resolve;
+           img.onerror = resolve; 
+        });
+      });
+      await Promise.all(imagePromises);
 
-      // 2. CAPTURE PAKE LIBRARY BARU
+      // Tunggu extra 1 detik biar frame background & filter mateng
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // 4. CAPTURE
       const dataUrl = await toPng(clonedElement, {
-        cacheBust: true, // Paksa refresh gambar (biar filter update)
-        pixelRatio: 3,   // HD Quality (Setara scale: 3)
+        cacheBust: true, // Paksa refresh cache
+        pixelRatio: 3,   // Kualitas HD
         quality: 1.0,
         backgroundColor: null,
-        // Pastikan ukuran canvas pas dengan elemen asli
         width: clonedElement.offsetWidth, 
         height: clonedElement.offsetHeight,
       });
 
-      // 3. DOWNLOAD
+      // 5. DOWNLOAD
       const link = document.createElement("a");
       link.download = `MEMORIA-${Date.now()}.png`;
       link.href = dataUrl;
@@ -145,7 +158,11 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
       link.click();
       document.body.removeChild(link);
       
-      setTimeout(() => { setIsSaving(false); onFinish(); }, 500);
+      // 6. FINISH (TAPI GAK PINDAH HALAMAN)
+      setTimeout(() => { 
+        setIsSaving(false); 
+        // onFinish(); <--- INI GUA HAPUS BIAR TETEP DI SINI
+      }, 500);
 
     } catch (error) {
       console.error("Gagal save:", error); 
