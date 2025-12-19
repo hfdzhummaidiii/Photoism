@@ -93,70 +93,89 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
 
   const handleDownload = async () => {
     if (!stripRef.current) return;
-    setSelectedPhotoIdx(null); // Tutup mode edit dulu
+    setSelectedPhotoIdx(null); // Tutup mode edit
     setIsSaving(true);
-    let clonedElement = null;
+
+    // 1. SIAPKAN WADAH GHAIB (IFRAME)
+    // Ini trik biar kloningan ngerender di "dunia lain" yang gak terpengaruh layar HP
+    const iframe = document.createElement('iframe');
+    Object.assign(iframe.style, {
+      position: 'fixed',
+      top: '-10000px', left: '-10000px', // Umpetin jauh-jauh
+      width: '1000px', height: '2000px', // Kasih ruang lega
+      visibility: 'hidden',
+      overflow: 'hidden'
+    });
+    document.body.appendChild(iframe);
 
     try {
-      // Tunggu render bentar biar UI bersih
-      await new Promise(resolve => setTimeout(resolve, 100)); 
+      // Tunggu iframe siap
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const doc = iframe.contentDocument || iframe.contentWindow.document;
       
+      // 2. KLONING STRIP KE DALAM IFRAME
       const originalElement = stripRef.current;
-      
-      // 1. BIKIN KLONINGAN (Duplikat Strip)
-      clonedElement = originalElement.cloneNode(true);
+      const clonedElement = originalElement.cloneNode(true);
 
-      // 2. RESET GAYA KLONINGAN (Biar Gak Gepeng/Miring)
-      // Kita paksa kloningan ini jadi ukuran normal, gak peduli layar HP kecil
+      // 3. RESET GAYA KLONINGAN (PENTING!)
+      // Hapus scale(0.85) dari HP, dan paksa lebar asli
       Object.assign(clonedElement.style, {
-        position: 'fixed', // Pake fixed biar aman
-        top: '-10000px',   // Buang jauh ke atas
-        left: '0',
-        width: selectedFrame.width || '300px', // PAKSA LEBAR ASLI (Penting!)
-        height: 'auto',    // Tinggi menyesuaikan
-        transform: 'none', // HAPUS SCALE/ZOOM (Ini obat anti gepeng)
+        transform: 'none', // HAPUS SCALE BIAR GAK GEPENG
         margin: '0',
-        padding: selectedFrame.isCustomPos ? '0' : '20px', // Pastikan padding aman
-        backgroundColor: selectedFrame.style.backgroundColor || 'white',
-        zIndex: '-9999',
+        // Kalau selectedFrame.width gak ada, pake default 320px
+        width: selectedFrame.width || '320px', 
+        height: 'auto',
+        boxShadow: 'none', // Biar bersih
+        backgroundColor: selectedFrame.style.backgroundColor || 'white', // Pastiin background kebawa
       });
 
-      // Masukin ke body biar bisa dicapture
-      document.body.appendChild(clonedElement);
+      // Masukin kloningan ke dalam iframe
+      doc.body.appendChild(clonedElement);
 
-      // 3. CAPTURE DENGAN KUALITAS TINGGI
+      // Tunggu sebentar biar browser ngerender ulang layout di dalam iframe
+      await new Promise(resolve => setTimeout(resolve, 300)); // Kasih waktu napas 300ms
+
+      // 4. CAPTURE DENGAN HTML2CANVAS
       const canvas = await html2canvas(clonedElement, {
-        scale: 4, // Resolusi tinggi (biar tajem pas di-zoom)
-        useCORS: true, 
-        backgroundColor: null, 
-        logging: false, 
-        imageTimeout: 0, 
-        allowTaint: true,
-        // Paksa ukuran canvas sesuai kloningan yang udah dibenerin
+        scale: 3, // Resolusi 3x lipat (HD)
+        useCORS: true, // WAJIB AKTIF BUAT FILTER
+        allowTaint: true, // Izinkan gambar dari luar
+        backgroundColor: null, // Transparan
+        logging: false,
+        imageTimeout: 0,
+        // Paksa ukuran canvas sesuai kloningan yang udah tegak
         width: clonedElement.offsetWidth,
         height: clonedElement.offsetHeight,
         windowWidth: clonedElement.offsetWidth,
-        windowHeight: clonedElement.offsetHeight
+        windowHeight: clonedElement.offsetHeight,
+        // Trik tambahan buat filter:
+        onclone: (clonedDoc) => {
+           // Kadang filter gak ke-apply di clone, kita paksa re-apply
+           const images = clonedDoc.getElementsByTagName('img');
+           for (let img of images) {
+               // Paksa browser sadar kalau ada filter
+               img.style.filter = getComputedStyle(img).filter; 
+           }
+        }
       });
 
-      // 4. DOWNLOAD
+      // 5. DOWNLOAD HASILNYA
       const image = canvas.toDataURL("image/png", 1.0);
       const link = document.createElement("a");
       link.href = image;
       link.download = `MEMORIA-${Date.now()}.png`;
       link.click();
       
-      // Selesai
       setTimeout(() => { setIsSaving(false); onFinish(); }, 1000);
 
     } catch (error) {
       console.error("Gagal save:", error); 
       setIsSaving(false); 
-      alert("Gagal menyimpan gambar. Coba lagi!");
+      alert("Gagal menyimpan gambar. Coba refresh dan ulangi.");
     } finally {
-      // Bersihin sampah kloningan
-      if (clonedElement && document.body.contains(clonedElement)) {
-        document.body.removeChild(clonedElement);
+      // Bersihin jejak iframe
+      if (iframe && document.body.contains(iframe)) {
+        document.body.removeChild(iframe);
       }
     }
   };
@@ -240,7 +259,19 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
 
               return (
                 <div key={i} style={wrapperStyle} onClick={(e) => { e.stopPropagation(); setSelectedPhotoIdx(i); }}>
-                  <img src={pic} alt="photo" style={{ width: '100%', height: '100%', objectFit: 'cover', transform: `scale(${adj.zoom}) translate(${adj.x}px, ${adj.y}px) rotate(${adj.rotate}deg)`, filter: activeFilter, transition: 'filter 0.3s ease' }} />
+                  <img 
+  crossOrigin="anonymous" // <-- INI MANTRANYA! JANGAN LUPA!
+  src={pic} 
+  alt="photo" 
+  style={{ 
+    width: '100%', 
+    height: '100%', 
+    objectFit: 'cover', 
+    transform: `scale(${adj.zoom}) translate(${adj.x}px, ${adj.y}px) rotate(${adj.rotate}deg)`, 
+    filter: activeFilter, // Filter CSS ini bakal kebaca kalau ada crossOrigin
+    transition: 'filter 0.3s ease' 
+  }} 
+/>
                 </div>
               );
             })}
