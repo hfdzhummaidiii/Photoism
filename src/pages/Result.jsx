@@ -91,91 +91,85 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
     delete containerStyle.backgroundImage; 
   }
 
-  const handleDownload = async () => {
+const handleDownload = async () => {
     if (!stripRef.current) return;
-    setSelectedPhotoIdx(null); // Tutup mode edit
+    setSelectedPhotoIdx(null); 
     setIsSaving(true);
-
-    // 1. SIAPKAN WADAH GHAIB (IFRAME)
-    // Ini trik biar kloningan ngerender di "dunia lain" yang gak terpengaruh layar HP
-    const iframe = document.createElement('iframe');
-    Object.assign(iframe.style, {
-      position: 'fixed',
-      top: '-10000px', left: '-10000px', // Umpetin jauh-jauh
-      width: '1000px', height: '2000px', // Kasih ruang lega
-      visibility: 'hidden',
-      overflow: 'hidden'
-    });
-    document.body.appendChild(iframe);
+    let clonedElement = null;
 
     try {
-      // Tunggu iframe siap
-      await new Promise(resolve => setTimeout(resolve, 100));
-      const doc = iframe.contentDocument || iframe.contentWindow.document;
-      
-      // 2. KLONING STRIP KE DALAM IFRAME
       const originalElement = stripRef.current;
-      const clonedElement = originalElement.cloneNode(true);
+      clonedElement = originalElement.cloneNode(true);
 
-      // 3. RESET GAYA KLONINGAN (PENTING!)
-      // Hapus scale(0.85) dari HP, dan paksa lebar asli
+      // --- PERBAIKAN UTAMA: PAKSA LEBAR ASLI (ANTI GEPENG) ---
+      // Ambil lebar asli dari frames.js. Kalau gak ada, default 320px
+      const realWidth = selectedFrame.width || '320px'; 
+
       Object.assign(clonedElement.style, {
-        transform: 'none', // HAPUS SCALE BIAR GAK GEPENG
+        position: 'fixed',        // Lepas dari layout layar
+        top: '0',                 
+        left: '-9999px',          // Umpetin jauh di kiri
+        width: realWidth,         // PAKSA UKURAN ASLI!
+        minWidth: realWidth,      // Pastiin gak nyusut
+        height: 'auto',           
+        transform: 'none',        // Hapus efek zoom/scale
         margin: '0',
-        // Kalau selectedFrame.width gak ada, pake default 320px
-        width: selectedFrame.width || '320px', 
-        height: 'auto',
-        boxShadow: 'none', // Biar bersih
-        backgroundColor: selectedFrame.style.backgroundColor || 'white', // Pastiin background kebawa
+        padding: selectedFrame.isCustomPos ? '0' : '20px', 
+        backgroundColor: selectedFrame.style.backgroundColor || 'white',
+        zIndex: '-1000',
+        borderRadius: '0' 
       });
 
-      // Masukin kloningan ke dalam iframe
-      doc.body.appendChild(clonedElement);
+      document.body.appendChild(clonedElement);
 
-      // Tunggu sebentar biar browser ngerender ulang layout di dalam iframe
-      await new Promise(resolve => setTimeout(resolve, 300)); // Kasih waktu napas 300ms
+      // Tunggu browser nata ulang (layouting) kloningan
+      await new Promise(resolve => setTimeout(resolve, 300));
 
-      // 4. CAPTURE DENGAN HTML2CANVAS
       const canvas = await html2canvas(clonedElement, {
-        scale: 3, // Resolusi 3x lipat (HD)
-        useCORS: true, // WAJIB AKTIF BUAT FILTER
-        allowTaint: true, // Izinkan gambar dari luar
-        backgroundColor: null, // Transparan
-        logging: false,
-        imageTimeout: 0,
-        // Paksa ukuran canvas sesuai kloningan yang udah tegak
+        scale: 3,      // Resolusi Tinggi (HD)
+        useCORS: true, // Wajib buat Filter
+        allowTaint: true,
+        backgroundColor: null,
+        // Paksa canvas ukurannya sama kayak kloningan yang udah bener
         width: clonedElement.offsetWidth,
         height: clonedElement.offsetHeight,
         windowWidth: clonedElement.offsetWidth,
         windowHeight: clonedElement.offsetHeight,
-        // Trik tambahan buat filter:
-        onclone: (clonedDoc) => {
-           // Kadang filter gak ke-apply di clone, kita paksa re-apply
-           const images = clonedDoc.getElementsByTagName('img');
-           for (let img of images) {
-               // Paksa browser sadar kalau ada filter
-               img.style.filter = getComputedStyle(img).filter; 
-           }
+        onclone: (doc) => {
+            // Trik Pancingan: Paksa browser nerapin filter ulang
+            const images = doc.getElementsByTagName('img');
+            for (let img of images) {
+                img.style.filter = img.style.filter; 
+            }
         }
       });
 
-      // 5. DOWNLOAD HASILNYA
-      const image = canvas.toDataURL("image/png", 1.0);
-      const link = document.createElement("a");
-      link.href = image;
-      link.download = `MEMORIA-${Date.now()}.png`;
-      link.click();
-      
-      setTimeout(() => { setIsSaving(false); onFinish(); }, 1000);
+      // Download pake Blob (Lebih aman buat Chrome/Safari)
+      canvas.toBlob((blob) => {
+        if (!blob) {
+            alert("Gagal memproses gambar.");
+            setIsSaving(false);
+            return;
+        }
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `MEMORIA-${Date.now()}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        
+        setTimeout(() => { setIsSaving(false); onFinish(); }, 500);
+      }, 'image/png', 1.0);
 
     } catch (error) {
       console.error("Gagal save:", error); 
       setIsSaving(false); 
-      alert("Gagal menyimpan gambar. Coba refresh dan ulangi.");
+      alert("Gagal menyimpan. Coba refresh browser.");
     } finally {
-      // Bersihin jejak iframe
-      if (iframe && document.body.contains(iframe)) {
-        document.body.removeChild(iframe);
+      if (clonedElement && document.body.contains(clonedElement)) {
+        document.body.removeChild(clonedElement);
       }
     }
   };
