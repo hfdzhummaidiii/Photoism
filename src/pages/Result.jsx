@@ -93,39 +93,68 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
 
   const handleDownload = async () => {
     if (!stripRef.current) return;
-    setSelectedPhotoIdx(null); 
+    setSelectedPhotoIdx(null); // Tutup mode edit dulu
     setIsSaving(true);
     let clonedElement = null;
 
     try {
+      // Tunggu render bentar biar UI bersih
       await new Promise(resolve => setTimeout(resolve, 100)); 
+      
       const originalElement = stripRef.current;
+      
+      // 1. BIKIN KLONINGAN (Duplikat Strip)
       clonedElement = originalElement.cloneNode(true);
 
+      // 2. RESET GAYA KLONINGAN (Biar Gak Gepeng/Miring)
+      // Kita paksa kloningan ini jadi ukuran normal, gak peduli layar HP kecil
       Object.assign(clonedElement.style, {
-        position: 'absolute', top: '-9999px', left: '-9999px',
-        height: 'auto', width: `${originalElement.offsetWidth}px`, 
-        overflow: 'visible', transform: 'none', zIndex: '-1000'
+        position: 'fixed', // Pake fixed biar aman
+        top: '-10000px',   // Buang jauh ke atas
+        left: '0',
+        width: selectedFrame.width || '300px', // PAKSA LEBAR ASLI (Penting!)
+        height: 'auto',    // Tinggi menyesuaikan
+        transform: 'none', // HAPUS SCALE/ZOOM (Ini obat anti gepeng)
+        margin: '0',
+        padding: selectedFrame.isCustomPos ? '0' : '20px', // Pastikan padding aman
+        backgroundColor: selectedFrame.style.backgroundColor || 'white',
+        zIndex: '-9999',
       });
 
+      // Masukin ke body biar bisa dicapture
       document.body.appendChild(clonedElement);
 
+      // 3. CAPTURE DENGAN KUALITAS TINGGI
       const canvas = await html2canvas(clonedElement, {
-        scale: 3, useCORS: true, backgroundColor: null, 
-        logging: false, imageTimeout: 0, allowTaint: true
+        scale: 4, // Resolusi tinggi (biar tajem pas di-zoom)
+        useCORS: true, 
+        backgroundColor: null, 
+        logging: false, 
+        imageTimeout: 0, 
+        allowTaint: true,
+        // Paksa ukuran canvas sesuai kloningan yang udah dibenerin
+        width: clonedElement.offsetWidth,
+        height: clonedElement.offsetHeight,
+        windowWidth: clonedElement.offsetWidth,
+        windowHeight: clonedElement.offsetHeight
       });
 
-      const image = canvas.toDataURL("image/png");
+      // 4. DOWNLOAD
+      const image = canvas.toDataURL("image/png", 1.0);
       const link = document.createElement("a");
       link.href = image;
-      link.download = `Photoism-${Date.now()}.png`;
+      link.download = `MEMORIA-${Date.now()}.png`;
       link.click();
       
+      // Selesai
       setTimeout(() => { setIsSaving(false); onFinish(); }, 1000);
 
     } catch (error) {
-      console.error("Gagal save:", error); setIsSaving(false); alert("Gagal menyimpan gambar.");
+      console.error("Gagal save:", error); 
+      setIsSaving(false); 
+      alert("Gagal menyimpan gambar. Coba lagi!");
     } finally {
+      // Bersihin sampah kloningan
       if (clonedElement && document.body.contains(clonedElement)) {
         document.body.removeChild(clonedElement);
       }
