@@ -141,13 +141,19 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
       await new Promise(resolve => setTimeout(resolve, 1000));
 
       // 4. CAPTURE
+      const isSmallScreen = window.innerWidth < 768;
       const dataUrl = await toPng(clonedElement, {
-        cacheBust: true, // Paksa refresh cache
-        pixelRatio: 3,   // Kualitas HD
+        cacheBust: false, // <--- JANGAN TRUE! INI BIANG KEROKNYA DI HP
+        pixelRatio: isSmallScreen ? 2 : 3, 
         quality: 1.0,
         backgroundColor: null,
         width: clonedElement.offsetWidth, 
         height: clonedElement.offsetHeight,
+        skipFonts: true, // Biar enteng
+        filter: (node) => {
+          // Filter tambahan biar gak ada elemen aneh yang ikut ke-render
+          return node.tagName !== 'LINK' && node.tagName !== 'SCRIPT';
+        }
       });
 
       // 5. DOWNLOAD
