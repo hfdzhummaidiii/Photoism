@@ -53,7 +53,6 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
   const [activeFilter, setActiveFilter] = useState(filterOptions[0].value);
   const [isSaving, setIsSaving] = useState(false);
   
-  // KITA PAKE 2 REF: SATU BUAT PREVIEW, SATU BUAT EXPORT (GHOST)
   const stripRef = useRef(null);
   const exportRef = useRef(null); 
   
@@ -93,42 +92,53 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
     delete containerStyle.backgroundImage; 
   }
 
-  // === FUNGSI DOWNLOAD BARU (Pake Ghost Strip) ===
+  // === FUNGSI DOWNLOAD FINAL ===
   const handleDownload = async () => {
-    // Kita capture exportRef (yang tersembunyi), BUKAN stripRef (yang di layar)
     if (!exportRef.current) return;
     setSelectedPhotoIdx(null); 
     setIsSaving(true);
     
-    // Overlay loading manual
+    // 1. LOADING OVERLAY (Tutupin layar pake ini biar user gak liat strip ghost)
     const loadingOverlay = document.createElement('div');
     Object.assign(loadingOverlay.style, {
       position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-      backgroundColor: 'rgba(255,255,255,0.9)', zIndex: '10001', 
+      backgroundColor: '#ffffff', zIndex: '10000', // Paling Depan
       display: 'flex', flexDirection:'column', alignItems: 'center', justifyContent: 'center',
       color: '#333', fontWeight: 'bold', fontSize: '1.2rem'
     });
-    loadingOverlay.innerHTML = '<span>Sedang Menyimpan...</span><span style="font-size:0.8rem; margin-top:5px">Tunggu sebentar ya!</span>';
+    loadingOverlay.innerHTML = '<span>Sedang Menyimpan...</span><span style="font-size:0.8rem; margin-top:5px; color:#888">Mohon tunggu sebentar</span>';
     document.body.appendChild(loadingOverlay);
 
     try {
-      // Tunggu dikit biar user liat loading
+      // 2. TUNGGU BROWSER NGERENDER
+      await new Promise(resolve => setTimeout(resolve, 800));
+
+      // 3. PAKSA LOAD GAMBAR
+      // Kita cek semua gambar di dalam Ghost Strip, pastiin udah ke-load
+      const ghostImages = exportRef.current.getElementsByTagName('img');
+      const imagePromises = Array.from(ghostImages).map(img => {
+        if (img.complete) return Promise.resolve();
+        return new Promise(resolve => {
+           img.onload = resolve;
+           img.onerror = resolve; 
+        });
+      });
+      await Promise.all(imagePromises);
+
+      // Tunggu lagi dikit biar aman
       await new Promise(resolve => setTimeout(resolve, 500));
 
-      // CAPTURE STRIP YANG TERSEMBUNYI (Ghost)
-      // Karena dia udah nempel di DOM dari awal, gambarnya pasti udah ke-load!
+      // 4. CAPTURE
       const isSmallScreen = window.innerWidth < 768;
-      
       const dataUrl = await toPng(exportRef.current, {
-        cacheBust: false,  // PENTING: False buat HP
+        cacheBust: false, 
         pixelRatio: isSmallScreen ? 2 : 3, 
         quality: 1.0,
         backgroundColor: null,
-        // Kita gak perlu set width/height manual, karena exportRef udah diset ukurannya via CSS di bawah
-        skipFonts: true, 
+        skipFonts: true,
       });
 
-      // DOWNLOAD
+      // 5. DOWNLOAD
       const link = document.createElement("a");
       link.download = `MEMORIA-${Date.now()}.png`;
       link.href = dataUrl;
@@ -136,9 +146,8 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
       link.click();
       document.body.removeChild(link);
       
-      setTimeout(() => { 
-        setIsSaving(false); 
-      }, 500);
+      // Delay tutup loading
+      setTimeout(() => { setIsSaving(false); }, 1000);
 
     } catch (error) {
       console.error("Gagal save:", error); 
@@ -151,16 +160,13 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
     }
   };
 
-  // --- COMPONENT RENDERER (Biar gak ngulang kodingan) ---
-  // Ini fungsi buat ngerender isi strip, dipake 2 kali (Preview & Ghost)
+  // --- RENDERER CONTENT ---
   const renderStripContent = (forExport = false) => (
     <>
       <div className="strip-content-wrapper" style={{
           ...containerStyle,
-          // Kalau export, paksa ukuran asli. Kalau preview, responsif (via CSS parent)
           width: forExport ? (selectedFrame.width || '320px') : '100%', 
           height: forExport ? (selectedFrame.height || 'auto') : '100%',
-          
           position: 'relative', 
           padding: selectedFrame.isCustomPos ? '0' : '20px',
           display: selectedFrame.isCustomPos ? 'block' : 'flex', flexDirection: 'column',
@@ -168,14 +174,13 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
           boxShadow: forExport ? 'none' : '0 20px 50px -10px rgba(0,0,0,0.3)', 
           backgroundColor: selectedFrame.style.backgroundColor || 'white',
           border: selectedFrame.isImageFrame ? 'none' : '10px solid white',
-          // Hapus scale transform buat export
           transform: 'none',
         }}>
         
         {displayPhotos.map((pic, i) => {
           const pos = selectedFrame.customPos ? selectedFrame.customPos[i] : null;
           const adj = photoAdjustments[i] || { zoom: 1, x: 0, y: 0, rotate: 0 }; 
-          const isSelected = !forExport && selectedPhotoIdx === i; // Export gak boleh ada highlight
+          const isSelected = !forExport && selectedPhotoIdx === i;
 
           const wrapperStyle = pos ? {
             position: 'absolute', top: pos.top, left: pos.left,
@@ -196,11 +201,10 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
           };
 
           return (
-            <div key={i} style={wrapperStyle} onClick={(e) => { 
-                if(!forExport) { e.stopPropagation(); setSelectedPhotoIdx(i); }
-            }}>
+            <div key={i} style={wrapperStyle} onClick={(e) => { if(!forExport) { e.stopPropagation(); setSelectedPhotoIdx(i); }}}>
               <img 
-                crossOrigin="anonymous" 
+                // PERBAIKAN: HAPUS crossOrigin JIKA LOCAL BLOB
+                // crossOrigin="anonymous"  <--- JANGAN PAKE INI UTK FOTO CAMERA
                 src={pic} 
                 alt="photo" 
                 style={{ 
@@ -238,17 +242,12 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
 
   return (
     <div style={{ 
-      display: 'flex', 
-      width: '100vw', 
-      minHeight: 'calc(100vh - 80px)', 
-      height: isMobile ? 'auto' : 'calc(100vh - 80px)', 
-      overflow: isMobile ? 'visible' : 'hidden', 
-      fontFamily: 'sans-serif',
-      flexDirection: isMobile ? 'column' : 'row',
-      background: '#f8f9fa'
+      display: 'flex', width: '100vw', minHeight: 'calc(100vh - 80px)', 
+      height: isMobile ? 'auto' : 'calc(100vh - 80px)', overflow: isMobile ? 'visible' : 'hidden', 
+      fontFamily: 'sans-serif', flexDirection: isMobile ? 'column' : 'row', background: '#f8f9fa'
     }}>
       
-      {/* ================= 1. PREVIEW AREA (YANG DILIHAT USER) ================= */}
+      {/* 1. PREVIEW AREA */}
       <div style={{ 
         flex: isMobile ? 'none' : 1, width: '100%', height: isMobile ? 'auto' : '100%', 
         overflowY: isMobile ? 'visible' : 'auto', position: 'relative',
@@ -256,18 +255,14 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
         backgroundSize: '20px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center',
         padding: isMobile ? '20px 0' : '0'
       }}>
-        <div style={{ 
-          margin: 'auto', padding: '40px',
-          transform: isMobile ? 'scale(0.85)' : 'none', transformOrigin: 'center center'
-        }}>
-          {/* RENDER STRIP PREVIEW */}
+        <div style={{ margin: 'auto', padding: '40px', transform: isMobile ? 'scale(0.85)' : 'none', transformOrigin: 'center center' }}>
           <div ref={stripRef} style={{ width: selectedFrame.width || '300px' }}>
              {renderStripContent(false)}
           </div>
         </div>
       </div>
 
-      {/* ================= 2. CONTROLS AREA ================= */}
+      {/* 2. CONTROLS AREA */}
       <div style={{ 
         width: isMobile ? '100%' : '380px', height: isMobile ? 'auto' : '100%', 
         background: 'white', borderLeft: isMobile ? 'none' : '1px solid #ddd', 
@@ -275,17 +270,16 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
         display: 'flex', flexDirection: 'column', padding: '20px 30px 40px 30px', 
         zIndex: 50, boxShadow: '-5px 0 20px rgba(0,0,0,0.05)',
       }}>
-        
+        {/* ... (Konten Control sama kayak sebelumnya) ... */}
         {!isMobile && (
           <div style={{ marginBottom: '15px', textAlign: 'center' }}>
             <h2 style={{ margin: 0, fontSize: '1.4rem', fontWeight: '800' }}>FINALIZE</h2>
             <p style={{ margin: '5px 0 0', fontSize: '0.8rem', color: '#888' }}>Sentuh foto untuk edit</p>
           </div>
         )}
-
         <div style={{ flex: 1, marginBottom: '20px' }}>
             {selectedPhotoIdx !== null && photoAdjustments[selectedPhotoIdx] ? (
-              // MODE EDIT
+              // EDIT MODE
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:'1px solid #eee', paddingBottom:'8px' }}>
                   <span style={{ fontWeight:'bold', fontSize:'0.9rem' }}>EDIT FOTO #{selectedPhotoIdx + 1}</span>
@@ -312,7 +306,7 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
                 <button onClick={() => setSelectedPhotoIdx(null)} style={{ width: '100%', padding: '10px', background: '#333', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>SELESAI</button>
               </div>
             ) : (
-              // MODE FILTER
+              // FILTER MODE
               <div>
                 <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'10px', color:'#333', fontWeight:'bold', fontSize:'0.9rem' }}>
                   <Wand size={16} fill="orange" color="orange" /><span>FILTER EFEK</span>
@@ -328,7 +322,6 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
               </div>
             )}
         </div>
-
         <div style={{ marginTop: 'auto', paddingTop: '20px', borderTop: '1px solid #eee', display: 'flex', gap: '10px', paddingBottom: isMobile ? '20px' : '0' }}>
           <button onClick={onRetake} disabled={isSaving} style={{ flex: 1, background: 'white', color: '#555', border: '2px solid #eee', padding: '15px', borderRadius: '10px', fontWeight: 'bold', fontSize: '0.9rem', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '5px' }}>
             <RefreshCcw size={16} /> ULANG
@@ -339,17 +332,17 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
         </div>
       </div>
 
-      {/* ================= 3. GHOST STRIP (HIDDEN TAPI RENDERED) ================= */}
-      {/* Ini strip rahasia yang bakal di-capture. Dia sembunyi di belakang background (-10) */}
+      {/* 3. GHOST STRIP (STRATEGI DEPAN MUKA) */}
       <div 
         ref={exportRef} 
         style={{
           position: 'fixed', 
           top: 0, left: 0, 
-          zIndex: -10, // Sembunyi di belakang
-          width: selectedFrame.width || '320px', // Paksa ukuran asli
-          // Pastikan dia visible secara DOM biar gambarnya ke-load
+          // KITA TARO DI DEPAN (z-index 900) TAPI KETUTUP LOADING OVERLAY (z-index 10000)
+          zIndex: 900, 
+          width: selectedFrame.width || '320px',
           visibility: 'visible',
+          // Pointer events none biar gak bisa diklik user pas lagi ngumpet
           pointerEvents: 'none'
         }}
       >
