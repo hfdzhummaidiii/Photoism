@@ -90,7 +90,7 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
     delete containerStyle.backgroundImage; 
   }
 
-  // === FUNGSI DOWNLOAD SAKTI (ANTI DOBEL & ANTI BLANK) ===
+  // === FUNGSI DOWNLOAD: SABAR & PAKSA ===
   const handleDownload = async () => {
     if (!stripRef.current) return;
     setSelectedPhotoIdx(null); 
@@ -99,30 +99,34 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
     let loadingOverlay = null;
 
     try {
-      // 1. BUAT LAYAR PUTIH (BIAR USER GAK LIAT PROSES DAPUR)
+      // 1. BUAT LAYAR LOADING (FULL SCREEN)
+      // Ini biar user gak liat proses 'dapur' kita
       loadingOverlay = document.createElement('div');
       Object.assign(loadingOverlay.style, {
         position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-        backgroundColor: '#ffffff', zIndex: '9999', // Paling Depan
+        backgroundColor: '#ffffff', zIndex: '99999', // Paling atas banget
         display: 'flex', flexDirection:'column', alignItems: 'center', justifyContent: 'center',
-        color: '#333', fontWeight: 'bold', fontSize: '1.2rem'
+        color: '#333', fontWeight: 'bold', fontSize: '1.2rem', fontFamily: 'sans-serif'
       });
-      loadingOverlay.innerHTML = '<span>Memproses Foto...</span><span style="font-size:0.8rem; margin-top:5px; color:#888">Tunggu sebentar ya!</span>';
+      loadingOverlay.innerHTML = `
+        <div style="margin-bottom: 15px;">⏳</div>
+        <span>Sedang Memproses Foto...</span>
+        <span style="font-size:0.8rem; margin-top:5px; color:#666; font-weight:normal">Mohon tunggu, jangan tutup tab ya!</span>
+      `;
       document.body.appendChild(loadingOverlay);
 
-      // 2. TUNGGU BROWSER NAFAS DIKIT
+      // Kasih waktu browser render overlay
       await new Promise(resolve => setTimeout(resolve, 300));
 
-      // 3. KLONING STRIP UTAMA
+      // 2. KLONING STRIP FOTO
       const originalElement = stripRef.current;
       clonedElement = originalElement.cloneNode(true);
 
       const realWidth = selectedFrame.width || '320px'; 
       const realHeight = selectedFrame.height || 'auto';
 
-      // 4. ATUR POSISI KLONINGAN (DI DEPAN, TAPI KETUTUP LAYAR PUTIH)
-      // Ini triknya! Kita taruh di zIndex 9000 (di bawah layar putih 9999)
-      // Tapi posisinya fixed di layar (bukan ngumpet di -9999px)
+      // 3. POSISIKAN KLONINGAN (DI DEPAN TAPI KETUTUP OVERLAY)
+      // Kita taruh z-index di bawah overlay (99990) tapi di atas konten lain
       Object.assign(clonedElement.style, {
         position: 'fixed',        
         top: '0',                 
@@ -134,7 +138,7 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
         margin: '0',
         padding: selectedFrame.isCustomPos ? '0' : '20px', 
         backgroundColor: selectedFrame.style.backgroundColor || 'white',
-        zIndex: '5000',           // Di bawah loading overlay
+        zIndex: '99990',          // Di bawah loading overlay, tapi di atas web
         borderRadius: '0',
         visibility: 'visible',
         boxShadow: 'none'         
@@ -142,28 +146,33 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
 
       document.body.appendChild(clonedElement);
 
-      // 5. PASTIKAN SEMUA GAMBAR DI KLONINGAN KE-LOAD
+      // 4. PAKSA LOAD SEMUA GAMBAR (INI KUNCINYA!)
       const images = clonedElement.getElementsByTagName('img');
       const imagePromises = Array.from(images).map(img => {
-        // Hapus crossOrigin di kloningan biar aman
-        img.removeAttribute('crossOrigin'); 
+        // Reset loading attribute biar gak lazy load
         img.loading = "eager";
+        img.removeAttribute('crossOrigin'); // Hapus ini biar gak error CORS di HP
+        
+        // Kalau gambar udah complete, oke. Kalau belum, kita tungguin onload-nya.
         if (img.complete) return Promise.resolve();
         return new Promise(resolve => {
-           img.onload = resolve;
-           img.onerror = resolve; 
+           img.onload = () => resolve();
+           img.onerror = () => resolve(); // Lanjut aja kalau error dikit
         });
       });
+      
+      // Tunggu sampe semua janji gambar terpenuhi
       await Promise.all(imagePromises);
 
-      // Tunggu lagi 1 detik (Penting buat HP kentang)
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // 5. ISTIRAHAT PANJANG (3 DETIK)
+      // Biarin browser HP napas dan ngerender filter CSS yang berat
+      await new Promise(resolve => setTimeout(resolve, 3000));
 
-      // 6. CAPTURE
+      // 6. JEPRET!
       const isSmallScreen = window.innerWidth < 768;
       const dataUrl = await toPng(clonedElement, {
-        cacheBust: false, // WAJIB FALSE
-        pixelRatio: isSmallScreen ? 2 : 3, 
+        cacheBust: false, // WAJIB FALSE buat HP
+        pixelRatio: isSmallScreen ? 2 : 3, // HP pake 2x aja biar gak berat
         quality: 1.0,
         backgroundColor: null,
         skipFonts: true,
@@ -177,15 +186,15 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
       link.click();
       document.body.removeChild(link);
       
-      // Delay tutup loading
-      setTimeout(() => { setIsSaving(false); }, 500);
+      // Kasih waktu user sadar download udah mulai, baru buka loadingnya
+      setTimeout(() => { setIsSaving(false); }, 1500);
 
     } catch (error) {
       console.error("Gagal save:", error); 
       setIsSaving(false); 
-      alert("Gagal menyimpan. Coba refresh browser.");
+      alert("Gagal menyimpan. Coba refresh browser kamu.");
     } finally {
-      // BERSIH-BERSIH (PENTING BIAR GAK DOBEL)
+      // BERSIH-BERSIH SPAM
       if (clonedElement && document.body.contains(clonedElement)) {
         document.body.removeChild(clonedElement);
       }
@@ -233,6 +242,7 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
               const isSelected = selectedPhotoIdx === i;
 
               const wrapperStyle = pos ? {
+                // KASUS 1: FRAME BERGAMBAR
                 position: 'absolute', top: pos.top, left: pos.left,
                 width: pos.width, height: pos.height, 
                 transform: `rotate(${pos.rotate || '0deg'})`,
@@ -241,6 +251,7 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
                 boxShadow: isSelected ? '0 0 0 4px #2196F3' : 'none', 
                 filter: activeFilter 
               } : {
+                // KASUS 2: FRAME POLOS (PADDING HACK)
                 width: '100%', height: 0, paddingBottom: '75%', position: 'relative',
                 borderRadius: selectedFrame.style.borderRadius ? '4px' : '0',
                 marginBottom: i === displayPhotos.length -1 ? 0 : '10px',
@@ -253,7 +264,6 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
               return (
                 <div key={i} style={wrapperStyle} onClick={(e) => { e.stopPropagation(); setSelectedPhotoIdx(i); }}>
                   <img 
-                    // HAPUS crossOrigin disini biar aman buat camera blob
                     src={pic} 
                     alt="photo" 
                     style={{ 
