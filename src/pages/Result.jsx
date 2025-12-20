@@ -52,9 +52,7 @@ const filterOptions = [
 const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) => {
   const [activeFilter, setActiveFilter] = useState(filterOptions[0].value);
   const [isSaving, setIsSaving] = useState(false);
-  
   const stripRef = useRef(null);
-  const exportRef = useRef(null); 
   
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   useEffect(() => {
@@ -92,31 +90,64 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
     delete containerStyle.backgroundImage; 
   }
 
-  // === FUNGSI DOWNLOAD FINAL ===
+  // === FUNGSI DOWNLOAD SAKTI (ANTI DOBEL & ANTI BLANK) ===
   const handleDownload = async () => {
-    if (!exportRef.current) return;
+    if (!stripRef.current) return;
     setSelectedPhotoIdx(null); 
     setIsSaving(true);
-    
-    // 1. LOADING OVERLAY (Tutupin layar pake ini biar user gak liat strip ghost)
-    const loadingOverlay = document.createElement('div');
-    Object.assign(loadingOverlay.style, {
-      position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-      backgroundColor: '#ffffff', zIndex: '10000', // Paling Depan
-      display: 'flex', flexDirection:'column', alignItems: 'center', justifyContent: 'center',
-      color: '#333', fontWeight: 'bold', fontSize: '1.2rem'
-    });
-    loadingOverlay.innerHTML = '<span>Sedang Menyimpan...</span><span style="font-size:0.8rem; margin-top:5px; color:#888">Mohon tunggu sebentar</span>';
-    document.body.appendChild(loadingOverlay);
+    let clonedElement = null;
+    let loadingOverlay = null;
 
     try {
-      // 2. TUNGGU BROWSER NGERENDER
-      await new Promise(resolve => setTimeout(resolve, 800));
+      // 1. BUAT LAYAR PUTIH (BIAR USER GAK LIAT PROSES DAPUR)
+      loadingOverlay = document.createElement('div');
+      Object.assign(loadingOverlay.style, {
+        position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+        backgroundColor: '#ffffff', zIndex: '9999', // Paling Depan
+        display: 'flex', flexDirection:'column', alignItems: 'center', justifyContent: 'center',
+        color: '#333', fontWeight: 'bold', fontSize: '1.2rem'
+      });
+      loadingOverlay.innerHTML = '<span>Memproses Foto...</span><span style="font-size:0.8rem; margin-top:5px; color:#888">Tunggu sebentar ya!</span>';
+      document.body.appendChild(loadingOverlay);
 
-      // 3. PAKSA LOAD GAMBAR
-      // Kita cek semua gambar di dalam Ghost Strip, pastiin udah ke-load
-      const ghostImages = exportRef.current.getElementsByTagName('img');
-      const imagePromises = Array.from(ghostImages).map(img => {
+      // 2. TUNGGU BROWSER NAFAS DIKIT
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // 3. KLONING STRIP UTAMA
+      const originalElement = stripRef.current;
+      clonedElement = originalElement.cloneNode(true);
+
+      const realWidth = selectedFrame.width || '320px'; 
+      const realHeight = selectedFrame.height || 'auto';
+
+      // 4. ATUR POSISI KLONINGAN (DI DEPAN, TAPI KETUTUP LAYAR PUTIH)
+      // Ini triknya! Kita taruh di zIndex 9000 (di bawah layar putih 9999)
+      // Tapi posisinya fixed di layar (bukan ngumpet di -9999px)
+      Object.assign(clonedElement.style, {
+        position: 'fixed',        
+        top: '0',                 
+        left: '0',                
+        width: realWidth,         
+        minWidth: realWidth,      
+        height: realHeight,       
+        transform: 'none',        
+        margin: '0',
+        padding: selectedFrame.isCustomPos ? '0' : '20px', 
+        backgroundColor: selectedFrame.style.backgroundColor || 'white',
+        zIndex: '5000',           // Di bawah loading overlay
+        borderRadius: '0',
+        visibility: 'visible',
+        boxShadow: 'none'         
+      });
+
+      document.body.appendChild(clonedElement);
+
+      // 5. PASTIKAN SEMUA GAMBAR DI KLONINGAN KE-LOAD
+      const images = clonedElement.getElementsByTagName('img');
+      const imagePromises = Array.from(images).map(img => {
+        // Hapus crossOrigin di kloningan biar aman
+        img.removeAttribute('crossOrigin'); 
+        img.loading = "eager";
         if (img.complete) return Promise.resolve();
         return new Promise(resolve => {
            img.onload = resolve;
@@ -125,20 +156,20 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
       });
       await Promise.all(imagePromises);
 
-      // Tunggu lagi dikit biar aman
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Tunggu lagi 1 detik (Penting buat HP kentang)
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
-      // 4. CAPTURE
+      // 6. CAPTURE
       const isSmallScreen = window.innerWidth < 768;
-      const dataUrl = await toPng(exportRef.current, {
-        cacheBust: false, 
+      const dataUrl = await toPng(clonedElement, {
+        cacheBust: false, // WAJIB FALSE
         pixelRatio: isSmallScreen ? 2 : 3, 
         quality: 1.0,
         backgroundColor: null,
         skipFonts: true,
       });
 
-      // 5. DOWNLOAD
+      // 7. DOWNLOAD
       const link = document.createElement("a");
       link.download = `MEMORIA-${Date.now()}.png`;
       link.href = dataUrl;
@@ -147,98 +178,22 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
       document.body.removeChild(link);
       
       // Delay tutup loading
-      setTimeout(() => { setIsSaving(false); }, 1000);
+      setTimeout(() => { setIsSaving(false); }, 500);
 
     } catch (error) {
       console.error("Gagal save:", error); 
       setIsSaving(false); 
-      alert("Gagal menyimpan. Coba refresh dan ulangi.");
+      alert("Gagal menyimpan. Coba refresh browser.");
     } finally {
-      if (document.body.contains(loadingOverlay)) {
+      // BERSIH-BERSIH (PENTING BIAR GAK DOBEL)
+      if (clonedElement && document.body.contains(clonedElement)) {
+        document.body.removeChild(clonedElement);
+      }
+      if (loadingOverlay && document.body.contains(loadingOverlay)) {
         document.body.removeChild(loadingOverlay);
       }
     }
   };
-
-  // --- RENDERER CONTENT ---
-  const renderStripContent = (forExport = false) => (
-    <>
-      <div className="strip-content-wrapper" style={{
-          ...containerStyle,
-          width: forExport ? (selectedFrame.width || '320px') : '100%', 
-          height: forExport ? (selectedFrame.height || 'auto') : '100%',
-          position: 'relative', 
-          padding: selectedFrame.isCustomPos ? '0' : '20px',
-          display: selectedFrame.isCustomPos ? 'block' : 'flex', flexDirection: 'column',
-          gap: '15px', boxSizing: 'border-box', 
-          boxShadow: forExport ? 'none' : '0 20px 50px -10px rgba(0,0,0,0.3)', 
-          backgroundColor: selectedFrame.style.backgroundColor || 'white',
-          border: selectedFrame.isImageFrame ? 'none' : '10px solid white',
-          transform: 'none',
-        }}>
-        
-        {displayPhotos.map((pic, i) => {
-          const pos = selectedFrame.customPos ? selectedFrame.customPos[i] : null;
-          const adj = photoAdjustments[i] || { zoom: 1, x: 0, y: 0, rotate: 0 }; 
-          const isSelected = !forExport && selectedPhotoIdx === i;
-
-          const wrapperStyle = pos ? {
-            position: 'absolute', top: pos.top, left: pos.left,
-            width: pos.width, height: pos.height, 
-            transform: `rotate(${pos.rotate || '0deg'})`,
-            borderRadius: '2px', overflow: 'hidden', zIndex: 10, cursor: forExport ? 'default' : 'pointer',
-            border: selectedFrame.isImageFrame ? 'none' : '4px solid white', boxSizing: 'border-box',
-            boxShadow: isSelected ? '0 0 0 4px #2196F3' : 'none', 
-            filter: activeFilter 
-          } : {
-            width: '100%', height: 0, paddingBottom: '75%', position: 'relative',
-            borderRadius: selectedFrame.style.borderRadius ? '4px' : '0',
-            marginBottom: i === displayPhotos.length -1 ? 0 : '10px',
-            overflow: 'hidden', zIndex: 10, cursor: forExport ? 'default' : 'pointer',
-            border: selectedFrame.isImageFrame ? 'none' : '5px solid white', boxSizing: 'border-box',
-            boxShadow: isSelected ? '0 0 0 4px #2196F3' : 'none', 
-            filter: activeFilter
-          };
-
-          return (
-            <div key={i} style={wrapperStyle} onClick={(e) => { if(!forExport) { e.stopPropagation(); setSelectedPhotoIdx(i); }}}>
-              <img 
-                // PERBAIKAN: HAPUS crossOrigin JIKA LOCAL BLOB
-                // crossOrigin="anonymous"  <--- JANGAN PAKE INI UTK FOTO CAMERA
-                src={pic} 
-                alt="photo" 
-                style={{ 
-                  position: pos ? 'static' : 'absolute', 
-                  top: 0, left: 0,
-                  width: '100%', height: '100%', objectFit: 'cover', 
-                  transform: `scale(${adj.zoom}) translate(${adj.x}px, ${adj.y}px) rotate(${adj.rotate}deg)`, 
-                }} 
-              />
-            </div>
-          );
-        })}
-
-        {selectedFrame.isImageFrame && (
-          <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundImage: selectedFrame.style.backgroundImage, backgroundSize: '100% 100%', pointerEvents: 'none', zIndex: 20 }} />
-        )}
-
-        {selectedFrame.stickers && selectedFrame.stickers.map((stk, idx) => {
-          if (stk.isIcon && StickerMap[stk.icon]) {
-            const IconComponent = StickerMap[stk.icon];
-            return (
-              <div key={idx} style={{ position: 'absolute', ...stk.style, zIndex: 50, pointerEvents: 'none', display: 'flex' }}>
-                <IconComponent color={stk.color} fill={stk.fill} size={stk.size} />
-              </div>
-            );
-          } return null;
-        })}
-        
-        {!selectedFrame.isImageFrame && (
-            <div style={{ textAlign:'center', fontWeight:'900', fontSize:'0.7rem', color: selectedFrame.textColor, marginTop: '10px', zIndex: 15, letterSpacing:'2px' }}>MEMORIA</div>
-        )}
-      </div>
-    </>
-  );
 
   return (
     <div style={{ 
@@ -256,8 +211,80 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
         padding: isMobile ? '20px 0' : '0'
       }}>
         <div style={{ margin: 'auto', padding: '40px', transform: isMobile ? 'scale(0.85)' : 'none', transformOrigin: 'center center' }}>
-          <div ref={stripRef} style={{ width: selectedFrame.width || '300px' }}>
-             {renderStripContent(false)}
+          
+          {/* STRIP UTAMA (YANG DILIHAT USER) */}
+          <div ref={stripRef} className="final-strip" style={{
+              ...containerStyle,
+              width: selectedFrame.width || '300px', 
+              height: selectedFrame.height || 'auto',
+              position: 'relative', 
+              padding: selectedFrame.isCustomPos ? '0' : '20px',
+              display: selectedFrame.isCustomPos ? 'block' : 'flex', flexDirection: 'column',
+              gap: '15px', boxSizing: 'border-box', 
+              boxShadow: '0 20px 50px -10px rgba(0,0,0,0.3)', 
+              transform: 'scale(1)', 
+              backgroundColor: selectedFrame.style.backgroundColor || 'white',
+              border: selectedFrame.isImageFrame ? 'none' : '10px solid white',
+            }}>
+            
+            {displayPhotos.map((pic, i) => {
+              const pos = selectedFrame.customPos ? selectedFrame.customPos[i] : null;
+              const adj = photoAdjustments[i] || { zoom: 1, x: 0, y: 0, rotate: 0 }; 
+              const isSelected = selectedPhotoIdx === i;
+
+              const wrapperStyle = pos ? {
+                position: 'absolute', top: pos.top, left: pos.left,
+                width: pos.width, height: pos.height, 
+                transform: `rotate(${pos.rotate || '0deg'})`,
+                borderRadius: '2px', overflow: 'hidden', zIndex: 10, cursor: 'pointer',
+                border: selectedFrame.isImageFrame ? 'none' : '4px solid white', boxSizing: 'border-box',
+                boxShadow: isSelected ? '0 0 0 4px #2196F3' : 'none', 
+                filter: activeFilter 
+              } : {
+                width: '100%', height: 0, paddingBottom: '75%', position: 'relative',
+                borderRadius: selectedFrame.style.borderRadius ? '4px' : '0',
+                marginBottom: i === displayPhotos.length -1 ? 0 : '10px',
+                overflow: 'hidden', zIndex: 10, cursor: 'pointer',
+                border: selectedFrame.isImageFrame ? 'none' : '5px solid white', boxSizing: 'border-box',
+                boxShadow: isSelected ? '0 0 0 4px #2196F3' : 'none', 
+                filter: activeFilter
+              };
+
+              return (
+                <div key={i} style={wrapperStyle} onClick={(e) => { e.stopPropagation(); setSelectedPhotoIdx(i); }}>
+                  <img 
+                    // HAPUS crossOrigin disini biar aman buat camera blob
+                    src={pic} 
+                    alt="photo" 
+                    style={{ 
+                      position: pos ? 'static' : 'absolute', 
+                      top: 0, left: 0,
+                      width: '100%', height: '100%', objectFit: 'cover', 
+                      transform: `scale(${adj.zoom}) translate(${adj.x}px, ${adj.y}px) rotate(${adj.rotate}deg)`, 
+                    }} 
+                  />
+                </div>
+              );
+            })}
+
+            {selectedFrame.isImageFrame && (
+              <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundImage: selectedFrame.style.backgroundImage, backgroundSize: '100% 100%', pointerEvents: 'none', zIndex: 20 }} />
+            )}
+
+            {selectedFrame.stickers && selectedFrame.stickers.map((stk, idx) => {
+              if (stk.isIcon && StickerMap[stk.icon]) {
+                const IconComponent = StickerMap[stk.icon];
+                return (
+                  <div key={idx} style={{ position: 'absolute', ...stk.style, zIndex: 50, pointerEvents: 'none', display: 'flex' }}>
+                    <IconComponent color={stk.color} fill={stk.fill} size={stk.size} />
+                  </div>
+                );
+              } return null;
+            })}
+            
+            {!selectedFrame.isImageFrame && (
+                <div style={{ textAlign:'center', fontWeight:'900', fontSize:'0.7rem', color: selectedFrame.textColor, marginTop: '10px', zIndex: 15, letterSpacing:'2px' }}>MEMORIA</div>
+            )}
           </div>
         </div>
       </div>
@@ -270,13 +297,14 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
         display: 'flex', flexDirection: 'column', padding: '20px 30px 40px 30px', 
         zIndex: 50, boxShadow: '-5px 0 20px rgba(0,0,0,0.05)',
       }}>
-        {/* ... (Konten Control sama kayak sebelumnya) ... */}
+        
         {!isMobile && (
           <div style={{ marginBottom: '15px', textAlign: 'center' }}>
             <h2 style={{ margin: 0, fontSize: '1.4rem', fontWeight: '800' }}>FINALIZE</h2>
             <p style={{ margin: '5px 0 0', fontSize: '0.8rem', color: '#888' }}>Sentuh foto untuk edit</p>
           </div>
         )}
+
         <div style={{ flex: 1, marginBottom: '20px' }}>
             {selectedPhotoIdx !== null && photoAdjustments[selectedPhotoIdx] ? (
               // EDIT MODE
@@ -330,23 +358,6 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
             {isSaving ? <Loader className="spin" size={18} /> : <Check size={18} />} SIMPAN
           </button>
         </div>
-      </div>
-
-      {/* 3. GHOST STRIP (STRATEGI DEPAN MUKA) */}
-      <div 
-        ref={exportRef} 
-        style={{
-          position: 'fixed', 
-          top: 0, left: 0, 
-          // KITA TARO DI DEPAN (z-index 900) TAPI KETUTUP LOADING OVERLAY (z-index 10000)
-          zIndex: 900, 
-          width: selectedFrame.width || '320px',
-          visibility: 'visible',
-          // Pointer events none biar gak bisa diklik user pas lagi ngumpet
-          pointerEvents: 'none'
-        }}
-      >
-        {renderStripContent(true)}
       </div>
 
       <style>{`
