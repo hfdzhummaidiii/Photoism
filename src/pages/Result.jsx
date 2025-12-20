@@ -91,6 +91,7 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
   }
 
   // === FUNGSI DOWNLOAD: SABAR & PAKSA ===
+  // === FUNGSI DOWNLOAD SAKTI V.FINAL (MANUAL BASE64 INJECTION) ===
   const handleDownload = async () => {
     if (!stripRef.current) return;
     setSelectedPhotoIdx(null); 
@@ -99,86 +100,91 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
     let loadingOverlay = null;
 
     try {
-      // 1. BUAT LAYAR LOADING (FULL SCREEN)
-      // Ini biar user gak liat proses 'dapur' kita
+      // 1. BUAT LAYAR LOADING
       loadingOverlay = document.createElement('div');
       Object.assign(loadingOverlay.style, {
         position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-        backgroundColor: '#ffffff', zIndex: '99999', // Paling atas banget
+        backgroundColor: '#ffffff', zIndex: '99999', 
         display: 'flex', flexDirection:'column', alignItems: 'center', justifyContent: 'center',
         color: '#333', fontWeight: 'bold', fontSize: '1.2rem', fontFamily: 'sans-serif'
       });
       loadingOverlay.innerHTML = `
-        <div style="margin-bottom: 15px;">⏳</div>
-        <span>Sedang Memproses Foto...</span>
-        <span style="font-size:0.8rem; margin-top:5px; color:#666; font-weight:normal">Mohon tunggu, jangan tutup tab ya!</span>
+        <div style="font-size: 2rem; margin-bottom: 15px;">🚀</div>
+        <span>Sedang Meracik Foto...</span>
+        <span style="font-size:0.8rem; margin-top:5px; color:#888">Tunggu bentar ya, jangan keluar!</span>
       `;
       document.body.appendChild(loadingOverlay);
 
-      // Kasih waktu browser render overlay
       await new Promise(resolve => setTimeout(resolve, 300));
 
-      // 2. KLONING STRIP FOTO
+      // 2. KLONING
       const originalElement = stripRef.current;
       clonedElement = originalElement.cloneNode(true);
 
       const realWidth = selectedFrame.width || '320px'; 
       const realHeight = selectedFrame.height || 'auto';
 
-      // 3. POSISIKAN KLONINGAN (DI DEPAN TAPI KETUTUP OVERLAY)
-      // Kita taruh z-index di bawah overlay (99990) tapi di atas konten lain
+      // 3. POSISIKAN KLONINGAN (DI DEPAN MUKA)
       Object.assign(clonedElement.style, {
-        position: 'fixed',        
-        top: '0',                 
-        left: '0',                
-        width: realWidth,         
-        minWidth: realWidth,      
-        height: realHeight,       
-        transform: 'none',        
-        margin: '0',
+        position: 'fixed', top: '0', left: '0',                
+        width: realWidth, minWidth: realWidth, height: realHeight,       
+        transform: 'none', margin: '0',
         padding: selectedFrame.isCustomPos ? '0' : '20px', 
         backgroundColor: selectedFrame.style.backgroundColor || 'white',
-        zIndex: '99990',          // Di bawah loading overlay, tapi di atas web
-        borderRadius: '0',
-        visibility: 'visible',
-        boxShadow: 'none'         
+        zIndex: '99990', borderRadius: '0', visibility: 'visible'         
       });
-
       document.body.appendChild(clonedElement);
 
-      // 4. PAKSA LOAD SEMUA GAMBAR (INI KUNCINYA!)
-      const images = clonedElement.getElementsByTagName('img');
-      const imagePromises = Array.from(images).map(img => {
-        // Reset loading attribute biar gak lazy load
-        img.loading = "eager";
-        img.removeAttribute('crossOrigin'); // Hapus ini biar gak error CORS di HP
-        
-        // Kalau gambar udah complete, oke. Kalau belum, kita tungguin onload-nya.
-        if (img.complete) return Promise.resolve();
-        return new Promise(resolve => {
-           img.onload = () => resolve();
-           img.onerror = () => resolve(); // Lanjut aja kalau error dikit
-        });
-      });
+      // --- [JURUS RAHASIA: KONVERSI MANUAL KE BASE64] ---
+      // Kita gak percaya sama html-to-image buat nge-fetch gambar blob.
+      // Kita lakuin sendiri manual!
       
-      // Tunggu sampe semua janji gambar terpenuhi
-      await Promise.all(imagePromises);
+      const originalImages = Array.from(originalElement.getElementsByTagName('img'));
+      const clonedImages = Array.from(clonedElement.getElementsByTagName('img'));
 
-      // 5. ISTIRAHAT PANJANG (3 DETIK)
-      // Biarin browser HP napas dan ngerender filter CSS yang berat
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Loop semua gambar, ubah jadi Base64
+      for (let i = 0; i < originalImages.length; i++) {
+        const original = originalImages[i];
+        const cloned = clonedImages[i];
 
-      // 6. JEPRET!
+        // Bikin kanvas sementara
+        const canvas = document.createElement('canvas');
+        canvas.width = original.naturalWidth || original.width;
+        canvas.height = original.naturalHeight || original.height;
+        const ctx = canvas.getContext('2d');
+        
+        // Gambar ulang image asli ke kanvas
+        ctx.drawImage(original, 0, 0);
+        
+        // Ambil datanya sebagai text Base64 (Data URL)
+        // Ini bikin gambar jadi "teks", jadi browser HP gak bakal ngeblokir lagi
+        try {
+            const base64Data = canvas.toDataURL('image/png');
+            cloned.src = base64Data; // SUNTIK DATA BARU
+            cloned.removeAttribute('crossOrigin'); // Hapus atribut ribet
+            cloned.loading = 'eager';
+        } catch (e) {
+            console.warn("Gagal convert gambar ke base64 (mungkin tainted)", e);
+            // Kalo gagal, kita biarin aja pake src lama, siapa tau hoki
+        }
+      }
+      // ----------------------------------------------------
+
+      // 4. TUNGGU BROWSER NAFAS (2 DETIK)
+      // Kasih waktu browser ngerender ulang data Base64 tadi
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // 5. CAPTURE
       const isSmallScreen = window.innerWidth < 768;
       const dataUrl = await toPng(clonedElement, {
-        cacheBust: false, // WAJIB FALSE buat HP
-        pixelRatio: isSmallScreen ? 2 : 3, // HP pake 2x aja biar gak berat
+        cacheBust: false, // WAJIB FALSE
+        pixelRatio: isSmallScreen ? 2 : 3, 
         quality: 1.0,
         backgroundColor: null,
         skipFonts: true,
       });
 
-      // 7. DOWNLOAD
+      // 6. DOWNLOAD
       const link = document.createElement("a");
       link.download = `MEMORIA-${Date.now()}.png`;
       link.href = dataUrl;
@@ -186,15 +192,13 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
       link.click();
       document.body.removeChild(link);
       
-      // Kasih waktu user sadar download udah mulai, baru buka loadingnya
-      setTimeout(() => { setIsSaving(false); }, 1500);
+      setTimeout(() => { setIsSaving(false); }, 1000);
 
     } catch (error) {
       console.error("Gagal save:", error); 
       setIsSaving(false); 
-      alert("Gagal menyimpan. Coba refresh browser kamu.");
+      alert("Gagal menyimpan. Coba refresh browser.");
     } finally {
-      // BERSIH-BERSIH SPAM
       if (clonedElement && document.body.contains(clonedElement)) {
         document.body.removeChild(clonedElement);
       }
