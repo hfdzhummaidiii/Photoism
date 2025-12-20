@@ -90,8 +90,24 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
     delete containerStyle.backgroundImage; 
   }
 
-  // === FUNGSI DOWNLOAD: SABAR & PAKSA ===
-  // === FUNGSI DOWNLOAD SAKTI V.FINAL (MANUAL BASE64 INJECTION) ===
+  // --- HELPER: CONVERT BLOB URL KE BASE64 ---
+  const convertBlobToBase64 = async (blobUrl) => {
+    try {
+      const response = await fetch(blobUrl);
+      const blob = await response.blob();
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    } catch (error) {
+      console.error("Gagal convert blob:", error);
+      return blobUrl; // Fallback ke url asli kalau gagal
+    }
+  };
+
+  // === FUNGSI DOWNLOAD "HEAVY DUTY" (ANTI BLANK DI HP) ===
   const handleDownload = async () => {
     if (!stripRef.current) return;
     setSelectedPhotoIdx(null); 
@@ -100,31 +116,33 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
     let loadingOverlay = null;
 
     try {
-      // 1. BUAT LAYAR LOADING
+      // 1. LAYAR LOADING (Biar user gak panik nunggu lama)
       loadingOverlay = document.createElement('div');
       Object.assign(loadingOverlay.style, {
         position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-        backgroundColor: '#ffffff', zIndex: '99999', 
+        backgroundColor: 'rgba(255,255,255,0.98)', zIndex: '99999', 
         display: 'flex', flexDirection:'column', alignItems: 'center', justifyContent: 'center',
-        color: '#333', fontWeight: 'bold', fontSize: '1.2rem', fontFamily: 'sans-serif'
+        color: '#333', fontFamily: 'sans-serif'
       });
       loadingOverlay.innerHTML = `
-        <div style="font-size: 2rem; margin-bottom: 15px;">🚀</div>
-        <span>Sedang Meracik Foto...</span>
-        <span style="font-size:0.8rem; margin-top:5px; color:#888">Tunggu bentar ya, jangan keluar!</span>
+        <div style="font-size: 3rem; margin-bottom: 20px; animation: bounce 1s infinite;">📸</div>
+        <div style="font-weight: 800; font-size: 1.2rem;">SEDANG MENCETAK...</div>
+        <div style="font-size: 0.9rem; color: #666; margin-top: 5px; max-width: 80%; text-align: center;">
+          Mohon tunggu, kami sedang menyusun piksel foto kamu agar HD.
+        </div>
       `;
       document.body.appendChild(loadingOverlay);
 
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // Napas dulu
+      await new Promise(resolve => setTimeout(resolve, 500));
 
-      // 2. KLONING
+      // 2. KLONING ELEMEN
       const originalElement = stripRef.current;
       clonedElement = originalElement.cloneNode(true);
-
       const realWidth = selectedFrame.width || '320px'; 
       const realHeight = selectedFrame.height || 'auto';
 
-      // 3. POSISIKAN KLONINGAN (DI DEPAN MUKA)
+      // 3. TARUH KLONINGAN DI DEPAN MUKA (Tapi ketutup overlay)
       Object.assign(clonedElement.style, {
         position: 'fixed', top: '0', left: '0',                
         width: realWidth, minWidth: realWidth, height: realHeight,       
@@ -135,43 +153,37 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
       });
       document.body.appendChild(clonedElement);
 
-      // --- [JURUS RAHASIA: KONVERSI MANUAL KE BASE64] ---
-      // Kita gak percaya sama html-to-image buat nge-fetch gambar blob.
-      // Kita lakuin sendiri manual!
-      
-      const originalImages = Array.from(originalElement.getElementsByTagName('img'));
-      const clonedImages = Array.from(clonedElement.getElementsByTagName('img'));
-
-      // Loop semua gambar, ubah jadi Base64
-      for (let i = 0; i < originalImages.length; i++) {
-        const original = originalImages[i];
-        const cloned = clonedImages[i];
-
-        // Bikin kanvas sementara
-        const canvas = document.createElement('canvas');
-        canvas.width = original.naturalWidth || original.width;
-        canvas.height = original.naturalHeight || original.height;
-        const ctx = canvas.getContext('2d');
+      // --- [STEP KRUSIAL: SUNTIK BASE64 MANUAL] ---
+      // Kita gak percaya sama library buat load gambar. Kita fetch sendiri!
+      const images = clonedElement.getElementsByTagName('img');
+      const imagePromises = Array.from(images).map(async (img) => {
+        // Hapus atribut pengganggu
+        img.removeAttribute('crossOrigin'); 
+        img.removeAttribute('loading');
         
-        // Gambar ulang image asli ke kanvas
-        ctx.drawImage(original, 0, 0);
+        // Ambil source asli
+        const originalSrc = img.src;
         
-        // Ambil datanya sebagai text Base64 (Data URL)
-        // Ini bikin gambar jadi "teks", jadi browser HP gak bakal ngeblokir lagi
-        try {
-            const base64Data = canvas.toDataURL('image/png');
-            cloned.src = base64Data; // SUNTIK DATA BARU
-            cloned.removeAttribute('crossOrigin'); // Hapus atribut ribet
-            cloned.loading = 'eager';
-        } catch (e) {
-            console.warn("Gagal convert gambar ke base64 (mungkin tainted)", e);
-            // Kalo gagal, kita biarin aja pake src lama, siapa tau hoki
+        // Kalau ini blob url (foto kamera), kita convert jadi text Base64
+        if (originalSrc.startsWith('blob:')) {
+            const base64 = await convertBlobToBase64(originalSrc);
+            img.src = base64; // GANTI SRC DENGAN BASE64
         }
-      }
-      // ----------------------------------------------------
+        
+        // Paksa browser nunggu sampe gambar ini 'ready'
+        await new Promise((resolve) => {
+            if (img.complete) resolve();
+            else {
+                img.onload = resolve;
+                img.onerror = resolve; // Lanjut aja meski error
+            }
+        });
+      });
 
-      // 4. TUNGGU BROWSER NAFAS (2 DETIK)
-      // Kasih waktu browser ngerender ulang data Base64 tadi
+      // Tunggu semua gambar selesai dikonversi & diload
+      await Promise.all(imagePromises);
+
+      // 4. ISTIRAHAT 2 DETIK (BIAR FILTER CSS MATENG)
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       // 5. CAPTURE
@@ -192,12 +204,13 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
       link.click();
       document.body.removeChild(link);
       
+      // Tutup loading
       setTimeout(() => { setIsSaving(false); }, 1000);
 
     } catch (error) {
       console.error("Gagal save:", error); 
       setIsSaving(false); 
-      alert("Gagal menyimpan. Coba refresh browser.");
+      alert("Gagal menyimpan gambar. Coba refresh browser.");
     } finally {
       if (clonedElement && document.body.contains(clonedElement)) {
         document.body.removeChild(clonedElement);
@@ -225,7 +238,6 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
       }}>
         <div style={{ margin: 'auto', padding: '40px', transform: isMobile ? 'scale(0.85)' : 'none', transformOrigin: 'center center' }}>
           
-          {/* STRIP UTAMA (YANG DILIHAT USER) */}
           <div ref={stripRef} className="final-strip" style={{
               ...containerStyle,
               width: selectedFrame.width || '300px', 
@@ -246,7 +258,6 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
               const isSelected = selectedPhotoIdx === i;
 
               const wrapperStyle = pos ? {
-                // KASUS 1: FRAME BERGAMBAR
                 position: 'absolute', top: pos.top, left: pos.left,
                 width: pos.width, height: pos.height, 
                 transform: `rotate(${pos.rotate || '0deg'})`,
@@ -255,7 +266,6 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
                 boxShadow: isSelected ? '0 0 0 4px #2196F3' : 'none', 
                 filter: activeFilter 
               } : {
-                // KASUS 2: FRAME POLOS (PADDING HACK)
                 width: '100%', height: 0, paddingBottom: '75%', position: 'relative',
                 borderRadius: selectedFrame.style.borderRadius ? '4px' : '0',
                 marginBottom: i === displayPhotos.length -1 ? 0 : '10px',
@@ -268,6 +278,7 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
               return (
                 <div key={i} style={wrapperStyle} onClick={(e) => { e.stopPropagation(); setSelectedPhotoIdx(i); }}>
                   <img 
+                    // JANGAN PAKE crossOrigin di sini
                     src={pic} 
                     alt="photo" 
                     style={{ 
@@ -321,7 +332,6 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
 
         <div style={{ flex: 1, marginBottom: '20px' }}>
             {selectedPhotoIdx !== null && photoAdjustments[selectedPhotoIdx] ? (
-              // EDIT MODE
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:'1px solid #eee', paddingBottom:'8px' }}>
                   <span style={{ fontWeight:'bold', fontSize:'0.9rem' }}>EDIT FOTO #{selectedPhotoIdx + 1}</span>
@@ -348,8 +358,7 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
                 <button onClick={() => setSelectedPhotoIdx(null)} style={{ width: '100%', padding: '10px', background: '#333', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>SELESAI</button>
               </div>
             ) : (
-              // FILTER MODE
-              <div>
+              <div style={{ overflowY: 'visible', maxHeight: 'none' }}>
                 <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'10px', color:'#333', fontWeight:'bold', fontSize:'0.9rem' }}>
                   <Wand size={16} fill="orange" color="orange" /><span>FILTER EFEK</span>
                 </div>
@@ -377,6 +386,7 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
       <style>{`
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { 100% { transform: rotate(360deg); } }
+        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #ddd; borderRadius: 3px; }
