@@ -90,10 +90,10 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
     delete containerStyle.backgroundImage; 
   }
 
-  // --- HELPER: CONVERT BLOB URL KE BASE64 ---
-  const convertBlobToBase64 = async (blobUrl) => {
+  // --- HELPER: CONVERT URL/BLOB KE BASE64 ---
+  const convertUrlToBase64 = async (url) => {
     try {
-      const response = await fetch(blobUrl);
+      const response = await fetch(url);
       const blob = await response.blob();
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -102,12 +102,19 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
         reader.readAsDataURL(blob);
       });
     } catch (error) {
-      console.error("Gagal convert blob:", error);
-      return blobUrl; // Fallback ke url asli kalau gagal
+      console.error("Gagal convert:", url, error);
+      return url; // Balikin asli kalau gagal
     }
   };
 
-  // === FUNGSI DOWNLOAD "HEAVY DUTY" (ANTI BLANK DI HP) ===
+  // --- HELPER: EXTRACT URL DARI CSS STRING ---
+  const extractUrlFromCss = (cssString) => {
+    if (!cssString) return null;
+    const match = cssString.match(/url\(["']?([^"']*)["']?\)/);
+    return match ? match[1] : null;
+  };
+
+  // === FUNGSI DOWNLOAD ULTIMATE (FRAME + FOTO FIX) ===
   const handleDownload = async () => {
     if (!stripRef.current) return;
     setSelectedPhotoIdx(null); 
@@ -116,33 +123,29 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
     let loadingOverlay = null;
 
     try {
-      // 1. LAYAR LOADING (Biar user gak panik nunggu lama)
+      // 1. LOADING SCREEN
       loadingOverlay = document.createElement('div');
       Object.assign(loadingOverlay.style, {
         position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-        backgroundColor: 'rgba(255,255,255,0.98)', zIndex: '99999', 
+        backgroundColor: '#ffffff', zIndex: '99999', 
         display: 'flex', flexDirection:'column', alignItems: 'center', justifyContent: 'center',
         color: '#333', fontFamily: 'sans-serif'
       });
       loadingOverlay.innerHTML = `
-        <div style="font-size: 3rem; margin-bottom: 20px; animation: bounce 1s infinite;">📸</div>
-        <div style="font-weight: 800; font-size: 1.2rem;">SEDANG MENCETAK...</div>
-        <div style="font-size: 0.9rem; color: #666; margin-top: 5px; max-width: 80%; text-align: center;">
-          Mohon tunggu, kami sedang menyusun piksel foto kamu agar HD.
-        </div>
+        <div style="font-size: 3rem; margin-bottom: 20px; animation: bounce 1s infinite;">🎨</div>
+        <div style="font-weight: 800; font-size: 1.2rem;">FINALIZING...</div>
+        <div style="font-size: 0.9rem; color: #666; margin-top: 5px;">Memproses Frame & Foto HD</div>
       `;
       document.body.appendChild(loadingOverlay);
 
-      // Napas dulu
       await new Promise(resolve => setTimeout(resolve, 500));
 
-      // 2. KLONING ELEMEN
+      // 2. KLONING
       const originalElement = stripRef.current;
       clonedElement = originalElement.cloneNode(true);
       const realWidth = selectedFrame.width || '320px'; 
       const realHeight = selectedFrame.height || 'auto';
 
-      // 3. TARUH KLONINGAN DI DEPAN MUKA (Tapi ketutup overlay)
       Object.assign(clonedElement.style, {
         position: 'fixed', top: '0', left: '0',                
         width: realWidth, minWidth: realWidth, height: realHeight,       
@@ -153,50 +156,54 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
       });
       document.body.appendChild(clonedElement);
 
-      // --- [STEP KRUSIAL: SUNTIK BASE64 MANUAL] ---
-      // Kita gak percaya sama library buat load gambar. Kita fetch sendiri!
-      const images = clonedElement.getElementsByTagName('img');
-      const imagePromises = Array.from(images).map(async (img) => {
-        // Hapus atribut pengganggu
+      // --- [STEP 1: URUS FOTO USER] ---
+      const images = Array.from(clonedElement.getElementsByTagName('img'));
+      const photoPromises = images.map(async (img) => {
         img.removeAttribute('crossOrigin'); 
         img.removeAttribute('loading');
-        
-        // Ambil source asli
-        const originalSrc = img.src;
-        
-        // Kalau ini blob url (foto kamera), kita convert jadi text Base64
-        if (originalSrc.startsWith('blob:')) {
-            const base64 = await convertBlobToBase64(originalSrc);
-            img.src = base64; // GANTI SRC DENGAN BASE64
+        if (img.src.startsWith('blob:') || img.src.startsWith('http')) {
+            const base64 = await convertUrlToBase64(img.src);
+            img.src = base64;
         }
-        
-        // Paksa browser nunggu sampe gambar ini 'ready'
         await new Promise((resolve) => {
             if (img.complete) resolve();
-            else {
-                img.onload = resolve;
-                img.onerror = resolve; // Lanjut aja meski error
-            }
+            else { img.onload = resolve; img.onerror = resolve; }
         });
       });
 
-      // Tunggu semua gambar selesai dikonversi & diload
-      await Promise.all(imagePromises);
+      // --- [STEP 2: URUS FRAME BACKGROUND] ---
+      // Kita cari elemen yang punya background-image di dalam kloningan
+      const divs = Array.from(clonedElement.getElementsByTagName('div'));
+      const framePromises = divs.map(async (div) => {
+          const bgImage = div.style.backgroundImage;
+          if (bgImage && bgImage.includes('url')) {
+              const url = extractUrlFromCss(bgImage);
+              if (url) {
+                  // Download frame image manual
+                  const base64Frame = await convertUrlToBase64(url);
+                  // Timpa style background dengan base64
+                  div.style.backgroundImage = `url('${base64Frame}')`;
+              }
+          }
+      });
 
-      // 4. ISTIRAHAT 2 DETIK (BIAR FILTER CSS MATENG)
+      // Tunggu semua (Foto + Frame) selesai diproses
+      await Promise.all([...photoPromises, ...framePromises]);
+
+      // 3. ISTIRAHAT 2 DETIK (WAJIB BUAT HP)
       await new Promise(resolve => setTimeout(resolve, 2000));
 
-      // 5. CAPTURE
+      // 4. CAPTURE
       const isSmallScreen = window.innerWidth < 768;
       const dataUrl = await toPng(clonedElement, {
-        cacheBust: false, // WAJIB FALSE
+        cacheBust: false, 
         pixelRatio: isSmallScreen ? 2 : 3, 
         quality: 1.0,
         backgroundColor: null,
         skipFonts: true,
       });
 
-      // 6. DOWNLOAD
+      // 5. DOWNLOAD
       const link = document.createElement("a");
       link.download = `MEMORIA-${Date.now()}.png`;
       link.href = dataUrl;
@@ -204,13 +211,12 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
       link.click();
       document.body.removeChild(link);
       
-      // Tutup loading
       setTimeout(() => { setIsSaving(false); }, 1000);
 
     } catch (error) {
       console.error("Gagal save:", error); 
       setIsSaving(false); 
-      alert("Gagal menyimpan gambar. Coba refresh browser.");
+      alert("Gagal menyimpan gambar. Coba refresh.");
     } finally {
       if (clonedElement && document.body.contains(clonedElement)) {
         document.body.removeChild(clonedElement);
@@ -278,7 +284,6 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
               return (
                 <div key={i} style={wrapperStyle} onClick={(e) => { e.stopPropagation(); setSelectedPhotoIdx(i); }}>
                   <img 
-                    // JANGAN PAKE crossOrigin di sini
                     src={pic} 
                     alt="photo" 
                     style={{ 
@@ -292,8 +297,17 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
               );
             })}
 
+            {/* --- FRAME IMAGE RENDER --- */}
             {selectedFrame.isImageFrame && (
-              <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundImage: selectedFrame.style.backgroundImage, backgroundSize: '100% 100%', pointerEvents: 'none', zIndex: 20 }} />
+              <div 
+                // KITA KASIH CLASS BIAR BISA DITANGKEP SAMA CODE DOWNLOAD DI ATAS
+                className="frame-bg-layer"
+                style={{ 
+                  position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', 
+                  backgroundImage: selectedFrame.style.backgroundImage, 
+                  backgroundSize: '100% 100%', pointerEvents: 'none', zIndex: 20 
+                }} 
+              />
             )}
 
             {selectedFrame.stickers && selectedFrame.stickers.map((stk, idx) => {
