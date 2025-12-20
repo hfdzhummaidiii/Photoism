@@ -1,0 +1,560 @@
+/* ==========================================================================
+   1. GLOBAL VARIABLES & RESET
+   ========================================================================== */
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;900&display=swap');
+
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  --geo-navy: #05263B;
+  --geo-coral: #FF4757;
+  --geo-yellow: #FFD32A;
+  --geo-pink: #FF9FF3;
+  --geo-white: #FFFFFF;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Montserrat', sans-serif;
+  overflow: hidden; /* Desktop gak scroll */
+  width: 100vw;
+  height: 100vh;
+  background-color: var(--geo-white) !important;
+  color: var(--geo-navy);
+}
+
+/* ==========================================================================
+   2. MAIN LAYOUT & NAVBAR
+   ========================================================================== */
+.container {
+  width: 100vw;
+  height: 100vh; /* Fallback */
+  height: 100dvh; /* FIX: Pake Dynamic Height biar aman di HP */
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- NAVBAR FIXED --- */
+.geo-header {
+  height: 80px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 50px;
+  background: white;
+  border-bottom: 5px solid var(--geo-navy);
+  z-index: 100;
+  flex-shrink: 0; 
+}
+
+.geo-logo {
+  font-weight: 900;
+  font-size: 1.8rem;
+  color: var(--geo-navy);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-transform: uppercase;
+}
+
+.geo-logo-icon {
+  width: 25px;
+  height: 25px;
+  background: var(--geo-coral);
+  border: 3px solid var(--geo-navy);
+  border-radius: 50%;
+}
+
+.geo-nav {
+  display: flex;
+  gap: 40px;
+  align-items: center;
+}
+
+.geo-nav span {
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--geo-navy);
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: 0.2s;
+}
+
+.geo-nav span:hover { color: var(--geo-coral); }
+
+.btn-login {
+  background: var(--geo-navy);
+  color: white !important;
+  padding: 10px 25px;
+  border-radius: 30px;
+}
+
+/* ==========================================================================
+   3. HOME PAGE (SPLIT SCREEN)
+   ========================================================================== */
+.geo-content {
+  flex: 1;
+  display: flex;
+  width: 100%;
+  overflow: hidden;
+  /* Default Desktop: Row (Kiri-Kanan) */
+  flex-direction: row; 
+}
+
+/* --- PANEL KIRI (PINK) --- */
+.left-panel {
+  flex: 1;
+  background: var(--geo-pink);
+  border-right: 5px solid var(--geo-navy);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  background-image: radial-gradient(var(--geo-navy) 1px, transparent 1px);
+  background-size: 20px 20px;
+  overflow: hidden; /* Biar dekorasi gak bocor */
+}
+
+/* Shape Dekorasi */
+.deco-circle {
+  position: absolute;
+  width: 350px;
+  height: 350px;
+  background: var(--geo-coral);
+  border: 5px solid var(--geo-navy);
+  border-radius: 50%;
+  top: 10%;
+  left: 10%;
+}
+.deco-rect {
+  position: absolute;
+  bottom: 10%;
+  right: -50px;
+  width: 200px;
+  height: 200px;
+  background: var(--geo-yellow);
+  border: 5px solid var(--geo-navy);
+  transform: rotate(15deg);
+}
+
+/* Photostrip Animation */
+.photostrip-container {
+  position: relative;
+  z-index: 10;
+  transform: rotate(-3deg);
+  transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+.photostrip-container:hover { transform: rotate(0deg) scale(1.05); }
+
+.photo-strip-card {
+  background: white;
+  width: 140px;
+  border: 5px solid var(--geo-navy);
+  padding: 40px 10px 10px 10px;
+  box-shadow: 15px 15px 0px rgba(0,0,0,0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.push-pin {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 20px;
+  height: 20px;
+  background: var(--geo-coral);
+  border: 3px solid var(--geo-navy);
+  border-radius: 50%;
+  z-index: 20;
+}
+
+.strip-img {
+  width: 100%;
+  aspect-ratio: 1/1;
+  object-fit: cover;
+  border: 3px solid var(--geo-navy);
+  filter: grayscale(100%);
+}
+
+/* --- PANEL KANAN (PUTIH) --- */
+.right-panel {
+  flex: 1;
+  background: white;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 80px;
+  position: relative;
+}
+
+.title-big {
+  font-size: 5rem;
+  line-height: 0.9;
+  font-weight: 900;
+  color: var(--geo-navy);
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.outline-text {
+  color: transparent;
+  -webkit-text-stroke: 3px var(--geo-navy);
+  position: relative;
+}
+.outline-text::before {
+  content: 'YOUR ART';
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  color: var(--geo-yellow);
+  -webkit-text-stroke: 0px;
+  z-index: -1;
+}
+
+.subtitle-badge {
+  display: inline-block;
+  background: var(--geo-navy);
+  color: white;
+  padding: 10px 20px;
+  font-weight: 700;
+  margin: 30px 0 20px 0;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  align-self: flex-start;
+  transform: skewX(-10deg);
+}
+
+.desc-text {
+  font-size: 1.1rem;
+  line-height: 1.6;
+  color: #333;
+  max-width: 450px;
+  margin-bottom: 40px;
+}
+
+.btn-start {
+  background: var(--geo-coral);
+  color: white;
+  font-size: 1.3rem;
+  font-weight: 800;
+  padding: 20px 50px;
+  border: 4px solid var(--geo-navy);
+  box-shadow: 10px 10px 0px var(--geo-navy);
+  cursor: pointer;
+  align-self: flex-start;
+  transition: 0.2s;
+  position: relative;
+  z-index: 99;
+}
+.btn-start:hover {
+  transform: translate(-4px, -4px);
+  box-shadow: 14px 14px 0px var(--geo-navy);
+  background: var(--geo-yellow);
+  color: var(--geo-navy);
+}
+
+/* ==========================================================================
+   4. SCROLLABLE CONTAINER (Selection Page)
+   ========================================================================== */
+.selection-container {
+  flex: 1; 
+  width: 100%;
+  overflow-y: auto; 
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start; 
+  padding: 40px 20px 80px 20px; 
+  background-color: #FFFDF0; 
+  background-image: radial-gradient(var(--geo-navy) 1px, transparent 1px);
+  background-size: 30px 30px;
+  scroll-behavior: smooth; 
+}
+
+/* Judul Selection */
+.selection-title {
+  font-size: 3rem;
+  color: var(--geo-navy);
+  font-weight: 900;
+  text-transform: uppercase;
+  background: white;
+  padding: 15px 30px;
+  border: 4px solid var(--geo-navy);
+  box-shadow: 10px 10px 0px var(--geo-coral); 
+  margin-bottom: 10px;
+  margin-top: 20px;
+  transform: rotate(-2deg); 
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.selection-subtitle {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #555;
+  background: white;
+  padding: 5px 15px;
+  border: 2px solid var(--geo-navy);
+  margin-bottom: 50px;
+  transform: rotate(1deg);
+  flex-shrink: 0;
+}
+
+.frames-grid {
+  display: flex;
+  gap: 40px;
+  flex-wrap: wrap;
+  justify-content: center;
+  width: 100%;
+  max-width: 1000px;
+  padding-bottom: 40px;
+}
+
+/* ==========================================================================
+   5. CARDS (Quantity & Frames)
+   ========================================================================== */
+.frame-option-card, .frame-selection-card {
+  background: white;
+  border: 4px solid var(--geo-navy);
+  padding: 15px;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  box-shadow: 8px 8px 0px rgba(0,0,0,0.1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+}
+
+.frame-option-card { width: 140px; height: 280px; }
+.frame-selection-card { width: 180px; gap: 15px; }
+
+.frame-option-card:hover, .frame-selection-card:hover {
+  transform: translateY(-10px);
+  box-shadow: 15px 15px 0px var(--geo-pink);
+  border-color: var(--geo-navy);
+}
+
+.mini-strip-preview {
+  width: 100%;
+  flex: 1;
+  background: #f4f4f4;
+  border: 2px solid var(--geo-navy);
+  display: flex;
+  flex-direction: column;
+  padding: 5px;
+  gap: 5px;
+  margin-bottom: 15px;
+}
+
+.mini-slot {
+  width: 100%;
+  background: #ddd;
+  border: 1px solid #bbb;
+}
+
+.big-num { font-size: 2.5rem; font-weight: 900; color: var(--geo-navy); }
+.frame-name { font-weight: 800; font-size: 1rem; color: var(--geo-navy); text-transform: uppercase; }
+
+.strip-preview-wrapper {
+  background: #f0f0f0;
+  width: 100%;
+  padding: 15px 5px;
+  border: 2px dashed #ddd;
+  display: flex;
+  justify-content: center;
+}
+
+.real-strip-preview {
+  width: 100px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  box-shadow: 3px 3px 5px rgba(0,0,0,0.1);
+}
+
+.preview-slot-placeholder {
+  width: 100%;
+  aspect-ratio: 1/1;
+  background: rgba(255,255,255,0.5);
+  border: 1px dashed rgba(0,0,0,0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 1.2rem;
+}
+
+.btn-back-home {
+  margin-top: 20px;
+  background: transparent;
+  color: var(--geo-navy);
+  font-weight: 800;
+  font-size: 1rem;
+  padding: 12px 30px;
+  border: 3px solid var(--geo-navy);
+  border-radius: 50px;
+  cursor: pointer;
+  transition: 0.2s;
+}
+.btn-back-home:hover { background: var(--geo-navy); color: white; }
+
+/* ==========================================================================
+   6. CAMERA & RESULT UI
+   ========================================================================== */
+.camera-overlay {
+  width: 100%;
+  height: 100%;
+  background: var(--geo-navy);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.final-strip {
+  background: white;
+  padding: 20px;
+  border: 5px solid var(--geo-navy);
+  box-shadow: 20px 20px 0px rgba(0,0,0,0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: relative;
+}
+
+/* ==========================================================================
+   🔥 RESPONSIVE MOBILE FIX (THE MAGIC IS HERE)
+   ========================================================================== */
+@media (max-width: 768px) {
+  
+  /* 1. Body & Container: Allow Scrolling on Mobile */
+ body { 
+  overflow-y: auto !important; 
+  overflow-x: hidden;
+  height: auto;
+  min-height: 100vh;
+}
+
+.container { 
+  height: auto !important; /* Biarin manjang ke bawah */
+  min-height: 100dvh; 
+  overflow-y: auto !important; /* INI KUNCINYA: PAKSA BIAR BISA SCROLL */
+  display: block; /* Ganti dari flex biar gak maksa 1 layar */
+}
+
+  /* 2. Header: Kecilin padding & Logo */
+  .geo-header { padding: 0 20px; height: 60px; }
+  .geo-logo { font-size: 1.4rem; }
+  .geo-nav { display: none; } /* Umpetin menu Gallery/Login biar lega */
+
+  /* 3. HOME PAGE: Layout Atas-Bawah */
+  .geo-content { flex-direction: column; }
+  
+  .left-panel {
+    flex: 0.8; /* Gambar lebih kecil */
+    border-right: none;
+    border-bottom: 5px solid var(--geo-navy);
+    padding: 20px;
+  }
+  
+  .right-panel {
+    flex: 1.2; /* Teks lebih gede areanya */
+    padding: 30px 20px;
+    text-align: center;
+    align-items: center;
+  }
+
+  /* Elemen Home Mobile */
+  .title-big { font-size: 3rem; }
+  .outline-text { -webkit-text-stroke: 2px var(--geo-navy); }
+  .desc-text { font-size: 0.9rem; text-align: center; }
+  .subtitle-badge { align-self: center; margin: 15px 0; font-size: 0.8rem; }
+  .btn-start { 
+    align-self: center; 
+    width: 100%; 
+    padding: 15px; 
+    font-size: 1.1rem;
+  }
+
+  /* Kecilin dekorasi background biar ga menuhin layar */
+  .deco-circle { width: 150px; height: 150px; top: 5%; left: 5%; }
+  .deco-rect { width: 100px; height: 100px; bottom: 5%; right: -20px; }
+  .photo-strip-card { width: 100px; padding-top: 30px; }
+
+  /* 4. QUANTITY & FRAMES GRID */
+  .selection-title { font-size: 1.5rem; padding: 10px 20px; }
+  .selection-subtitle { font-size: 0.9rem; }
+  .frames-grid { 
+    gap: 15px; 
+    padding-bottom: 100px; /* Biar slot paling bawah ga ketutupan */
+  }
+  .frame-selection-card { width: 45%; } /* Jadi 2 kolom di HP */
+  
+  /* 5. FIX CAMERA */
+  .camera-mask-wrapper { width: 90% !important; border-width: 2px; }
+
+  .frame-option-card {
+    width: 45%; /* Jadi 2 Kolom (Kiri-Kanan) */
+    height: 180px; /* Lebih pendek dari desktop (280px) biar muat layar */
+    padding: 10px;
+  }
+
+  .frame-option-card .big-num {
+    font-size: 2rem; /* Angka lebih kecil dikit */
+  }
+
+  /* Biar Gridnya Rapi di Tengah */
+  .frames-grid {
+    display: flex; /* Pastiin flex aktif */
+    flex-wrap: wrap; /* Pastiin bisa turun baris */
+    justify-content: center; /* PENTING: Biar ke tengah */
+    align-items: center;
+    gap: 15px; 
+    width: 100%;
+    padding-bottom: 100px;
+  }
+  
+}
+.btn-select-mini {
+  font-size: 0.8rem; /* Gedein dikit fontnya biar kebaca */
+  font-weight: 800;
+  background: var(--geo-navy);
+  color: white;
+  padding: 10px 0; /* Padding atas-bawah aja */
+  border-radius: 6px;
+  
+  /* LOGIC BARU: Default-nya (HP) selalu muncul & full width */
+  display: block;
+  opacity: 1;
+  transform: none;
+  width: 100%; /* Menuhin kartu biar rapi */
+  text-align: center;
+  margin-top: 10px;
+  transition: 0.2s;
+  letter-spacing: 1px;
+}
+
+/* KHUSUS LAPTOP/PC (Layar Gede): Baru kita kasih efek ngumpet (Hover) */
+@media (min-width: 769px) {
+  .btn-select-mini {
+    width: auto; /* Balikin jadi kecil ngikutin teks */
+    padding: 5px 15px;
+    opacity: 0; /* Ngumpet dulu */
+    transform: translateY(10px); /* Turun dikit */
+  }
+
+  .frame-selection-card:hover .btn-select-mini {
+    opacity: 1; /* Muncul pas di-hover */
+    transform: translateY(0);
+  }
+}
+
