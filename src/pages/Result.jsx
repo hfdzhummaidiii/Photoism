@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from 'react';
-// HAPUS html-to-image, KITA GAK BUTUH DIA LAGI!
 import { 
   Heart, Star, Sparkles, Music, Cloud, Sun, Moon, 
   Zap, Smile, Flower, Anchor, Camera, Film,
@@ -94,7 +93,7 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
   const loadImage = (src) => {
     return new Promise((resolve, reject) => {
       const img = new Image();
-      img.crossOrigin = "anonymous"; // Penting buat ngambil gambar eksternal
+      img.crossOrigin = "anonymous"; 
       img.onload = () => resolve(img);
       img.onerror = (e) => reject(e);
       img.src = src;
@@ -109,43 +108,76 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
     return parseFloat(valStr) || 0;
   };
 
-  // === FUNGSI DOWNLOAD MANUAL CANVAS (ANTI-BLANK 100%) ===
+  // === HELPER: DATA URL TO BLOB (FIX CHROME IPHONE) ===
+  const dataURLtoBlob = (dataurl) => {
+    var arr = dataurl.split(','), mime = arr[0].match(/:(.*?);/)[1],
+        bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
+    while(n--){
+        u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new Blob([u8arr], {type:mime});
+  }
+
+  // === FUNGSI DOWNLOAD MANUAL CANVAS ===
   const handleDownload = async () => {
     setSelectedPhotoIdx(null); 
     setIsSaving(true);
 
     try {
-      // 1. TENTUKAN UKURAN KANVAS ASLI (HD)
-      // Kita ambil ukuran dari frames.js, misal "400px" jadi 400
-      const targetWidth = parseFloat(selectedFrame.width || '320') * 3; // Kali 3 biar HD
-      const targetHeight = parseFloat(selectedFrame.height || '800') * 3;
-
-      // 2. BIKIN KANVAS DI MEMORI (Gak perlu ditempel di DOM)
+      // 1. SETUP CANVAS HD
+      const scaleFactor = 3; // Resolusi tajam
+      const baseWidth = parseFloat(selectedFrame.width || '300'); // Base width visual
+      const targetWidth = baseWidth * scaleFactor;
+      
+      // Hitung tinggi otomatis kalo auto, atau pake tinggi fix
+      // Estimasi tinggi buat frame vertical biasa: (TopPad + BottomPad + (PhotoHeight * Count) + (Gap * (Count-1)))
+      // Tapi lebih aman pake aspect ratio standar atau ngitung manual nanti
+      let targetHeight = parseFloat(selectedFrame.height || '800') * scaleFactor;
+      
       const canvas = document.createElement('canvas');
-      canvas.width = targetWidth;
-      canvas.height = targetHeight;
       const ctx = canvas.getContext('2d');
-
-      // Aktifkan antialiasing
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
 
-      // 3. GAMBAR BACKGROUND WARNA (Kertas Dasarnya)
-      ctx.fillStyle = selectedFrame.style.backgroundColor || 'white';
+      // --- LOGIC FRAME CSS (VERTICAL STACK) YANG LEBIH RAPI ---
+      let photoW, photoH, startX, startY, gap, padding;
+
+      if (!selectedFrame.isCustomPos) {
+        // Definisikan padding & gap persis seperti CSS (dikalikan scaleFactor)
+        padding = 20 * scaleFactor; 
+        gap = 15 * scaleFactor;
+        const textSpace = 60 * scaleFactor; // Space buat tulisan MEMORIA di bawah
+
+        // Lebar foto = Lebar canvas - (padding kiri kanan)
+        photoW = targetWidth - (padding * 2);
+        // Tinggi foto = Ratio 4:3 standar
+        photoH = photoW * 0.75; 
+        
+        // Hitung ulang tinggi canvas biar pas sama isi konten + gap + text
+        // (Hanya jika frame bukan fixed height)
+        const totalContentHeight = (padding * 2) + (displayPhotos.length * photoH) + ((displayPhotos.length - 1) * gap) + textSpace;
+        
+        // Update tinggi canvas
+        targetHeight = totalContentHeight;
+      }
+      
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+
+      // 2. BACKGROUND UTAMA
+      ctx.fillStyle = selectedFrame.style.backgroundColor || '#ffffff';
       ctx.fillRect(0, 0, targetWidth, targetHeight);
 
-      // 4. GAMBAR FOTO USER (LAYER TENGAH)
-      // Kita loop foto-foto dan tempel manual
+      // 3. LOOPING FOTO & DRAWING
       for (let i = 0; i < displayPhotos.length; i++) {
         const photoSrc = displayPhotos[i];
-        const img = await loadImage(photoSrc); // Load foto user
+        const img = await loadImage(photoSrc);
         const adj = photoAdjustments[i] || { zoom: 1, x: 0, y: 0, rotate: 0 };
         
         let x, y, w, h, r = 0;
 
-        // Hitung posisi berdasarkan jenis frame
         if (selectedFrame.isCustomPos && selectedFrame.customPos[i]) {
-            // Frame Gambar (Custom Posisi)
+            // -- MODE CUSTOM POS (FRAME GAMBAR) --
             const pos = selectedFrame.customPos[i];
             x = parsePct(pos.left, targetWidth);
             y = parsePct(pos.top, targetHeight);
@@ -153,43 +185,48 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
             h = parsePct(pos.height, targetHeight);
             r = parseFloat(pos.rotate || 0);
         } else {
-            // Frame Polos (Stack Vertical)
-            // Padding hack simulasi (misal 20px dari kiri)
-            const padding = targetWidth * 0.05; // 5% padding
-            const availWidth = targetWidth - (padding * 2);
-            w = availWidth;
-            h = w * 0.75; // Aspect ratio 4:3
+            // -- MODE CSS STACK (FRAME POLOS) --
+            // Posisi X selalu mulai dari padding
             x = padding;
-            // Hitung Y (Padding atas + (tinggi + margin) * index)
-            const startY = padding; 
-            const margin = targetHeight * 0.02;
-            y = startY + (h + margin) * i;
+            // Posisi Y = Padding atas + (urutan * (tinggi foto + gap))
+            y = padding + (i * (photoH + gap));
+            w = photoW;
+            h = photoH;
+            
+            // GAMBAR BORDER PUTIH (Polaroid Effect)
+            // Ini biar sama kayak tampilan di layar yang pake border CSS
+            if (!selectedFrame.isImageFrame) {
+                const borderWidth = 5 * scaleFactor; // 5px border
+                ctx.save();
+                ctx.fillStyle = '#ffffff';
+                // Gambar kotak putih sedikit lebih besar di belakang foto
+                ctx.fillRect(x - borderWidth, y - borderWidth, w + (borderWidth*2), h + (borderWidth*2));
+                ctx.restore();
+            }
         }
 
-        // --- PROSES DRAWING DENGAN TRANSFORMASI (ZOOM/GESER/PUTAR) ---
+        // --- PROSES DRAWING FOTO ---
         ctx.save();
         
-        // 1. Bikin area kliping (biar foto gak keluar kotak slot)
-        // Kita pindah titik nol ke pusat slot foto biar muternya enak
+        // Pindah titik pusat ke tengah area foto
         const cx = x + w / 2;
         const cy = y + h / 2;
         ctx.translate(cx, cy);
-        ctx.rotate((r * Math.PI) / 180); // Putar slot frame (jika miring)
+        ctx.rotate((r * Math.PI) / 180);
         
-        // Bikin kotak path buat kliping
+        // Bikin kliping area (kotak foto)
         ctx.beginPath();
         ctx.rect(-w / 2, -h / 2, w, h);
-        ctx.clip(); // Potong area gambar cuma di dalam kotak ini
+        ctx.clip(); 
 
-        // 2. Terapkan Edit User (Zoom/Geser/Putar Foto)
-        // Geser foto (Adjust X/Y user harus diskalakan ke ukuran canvas HD)
-        const scaleMult = targetWidth / 320; // Multiplier biar geserannya pas di HD
-        ctx.translate(adj.x * scaleMult, adj.y * scaleMult);
+        // Apply Transform User (Zoom/Geser)
+        // Adjust X/Y user harus diskalakan ke ukuran canvas HD
+        const userScaleMult = targetWidth / 320; 
+        ctx.translate(adj.x * userScaleMult, adj.y * userScaleMult);
         ctx.scale(adj.zoom, adj.zoom);
         ctx.rotate((adj.rotate * Math.PI) / 180);
 
-        // 3. Draw Image (Center Crop Logic)
-        // Biar 'object-fit: cover' manual
+        // Object Fit: Cover Logic
         const imgRatio = img.width / img.height;
         const slotRatio = w / h;
         let drawW, drawH;
@@ -202,57 +239,67 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
             drawH = w / imgRatio;
         }
         
-        // Apply Filter CSS (Terbatas di Canvas)
+        // APPLY FILTER (Safari Friendly)
         if (activeFilter !== 'none') {
-            // Canvas filter syntax mirip CSS
             ctx.filter = activeFilter;
+        } else {
+            ctx.filter = 'none'; // Reset penting!
         }
 
         ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
         
-        ctx.restore(); // Reset filter & transform buat foto berikutnya
+        ctx.restore(); // Reset semua transform & filter
       }
 
-      // 5. GAMBAR FRAME OVERLAY (PNG BOLONG-BOLONG)
+      // 4. OVERLAY FRAME GAMBAR (PNG)
       if (selectedFrame.isImageFrame && selectedFrame.style.backgroundImage) {
-        // Ambil URL dari string `url("/images/...")`
         const urlMatch = selectedFrame.style.backgroundImage.match(/url\(["']?([^"']*)["']?\)/);
         if (urlMatch) {
             const frameUrl = urlMatch[1];
             const frameImg = await loadImage(frameUrl);
-            // Gambar frame menutupi seluruh kanvas
             ctx.drawImage(frameImg, 0, 0, targetWidth, targetHeight);
         }
       }
 
-      // 6. GAMBAR TEKS "MEMORIA" (Kalo bukan frame gambar)
+      // 5. STICKERS
+      // (Optional: Kalau mau sticker ikut kedownload, perlu logic tambahan disini)
+      // Saat ini sticker hanya HTML overlay, jadi gak masuk canvas otomatis.
+
+      // 6. TULISAN "MEMORIA" (Kalo Frame CSS)
       if (!selectedFrame.isImageFrame) {
         ctx.save();
-        ctx.font = `900 ${targetWidth * 0.05}px sans-serif`; // Responsive font size
+        const fontSize = 16 * scaleFactor; // Sesuaikan ukuran font
+        ctx.font = `900 ${fontSize}px sans-serif`;
         ctx.fillStyle = selectedFrame.textColor || '#333';
         ctx.textAlign = 'center';
-        ctx.letterSpacing = '5px';
-        ctx.fillText("MEMORIA", targetWidth / 2, targetHeight - (targetHeight * 0.03));
+        ctx.letterSpacing = `${2 * scaleFactor}px`; // Tracking
+        // Posisi teks di bawah foto terakhir + dikit
+        const textY = targetHeight - (25 * scaleFactor); 
+        ctx.fillText("MEMORIA", targetWidth / 2, textY);
         ctx.restore();
       }
 
-      // 7. EXPORT JADI PNG
+      // 7. EXPORT & DOWNLOAD (FIX IOS CHROME)
       const dataUrl = canvas.toDataURL('image/png', 1.0);
+      const blob = dataURLtoBlob(dataUrl); // Convert ke Blob
+      const blobUrl = URL.createObjectURL(blob); // Bikin URL lokal
 
-      // 8. DOWNLOAD
       const link = document.createElement("a");
       link.download = `MEMORIA-${Date.now()}.png`;
-      link.href = dataUrl;
+      link.href = blobUrl;
       document.body.appendChild(link);
       link.click();
+      
+      // Cleanup
       document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
 
       setTimeout(() => { setIsSaving(false); }, 1000);
 
     } catch (error) {
       console.error("Gagal Manual Render:", error); 
       setIsSaving(false); 
-      alert("Gagal menyimpan. Coba refresh browser.");
+      alert("Gagal menyimpan. Coba refresh browser atau gunakan Safari.");
     }
   };
 
@@ -287,7 +334,7 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
               border: selectedFrame.isImageFrame ? 'none' : '10px solid white',
             }}>
             
-            {/* INI CUMA BUAT DISPLAY DI LAYAR (HTML) */}
+            {/* DISPLAY PREVIEW (HTML) */}
             {displayPhotos.map((pic, i) => {
               const pos = selectedFrame.customPos ? selectedFrame.customPos[i] : null;
               const adj = photoAdjustments[i] || { zoom: 1, x: 0, y: 0, rotate: 0 }; 
