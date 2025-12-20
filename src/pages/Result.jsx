@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { toPng } from 'html-to-image';
+// HAPUS html-to-image, KITA GAK BUTUH DIA LAGI!
 import { 
   Heart, Star, Sparkles, Music, Cloud, Sun, Moon, 
   Zap, Smile, Flower, Anchor, Camera, Film,
@@ -90,140 +90,169 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
     delete containerStyle.backgroundImage; 
   }
 
-  // --- HELPER: CONVERT URL/BLOB KE BASE64 ---
-  const convertUrlToBase64 = async (url) => {
-    try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
-    } catch (error) {
-      console.error("Gagal convert:", url, error);
-      return url; // Balikin asli kalau gagal
+  // === HELPER: LOAD IMAGE SECARA MANUAL ===
+  const loadImage = (src) => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous"; // Penting buat ngambil gambar eksternal
+      img.onload = () => resolve(img);
+      img.onerror = (e) => reject(e);
+      img.src = src;
+    });
+  };
+
+  // === HELPER: PARSE PERSENTASE KE PIXEL ===
+  const parsePct = (valStr, dimension) => {
+    if (typeof valStr === 'string' && valStr.includes('%')) {
+      return (parseFloat(valStr) / 100) * dimension;
     }
+    return parseFloat(valStr) || 0;
   };
 
-  // --- HELPER: EXTRACT URL DARI CSS STRING ---
-  const extractUrlFromCss = (cssString) => {
-    if (!cssString) return null;
-    const match = cssString.match(/url\(["']?([^"']*)["']?\)/);
-    return match ? match[1] : null;
-  };
-
-  // === FUNGSI DOWNLOAD ULTIMATE (FRAME + FOTO FIX) ===
+  // === FUNGSI DOWNLOAD MANUAL CANVAS (ANTI-BLANK 100%) ===
   const handleDownload = async () => {
-    if (!stripRef.current) return;
     setSelectedPhotoIdx(null); 
     setIsSaving(true);
-    let clonedElement = null;
-    let loadingOverlay = null;
 
     try {
-      // 1. LOADING SCREEN
-      loadingOverlay = document.createElement('div');
-      Object.assign(loadingOverlay.style, {
-        position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-        backgroundColor: '#ffffff', zIndex: '99999', 
-        display: 'flex', flexDirection:'column', alignItems: 'center', justifyContent: 'center',
-        color: '#333', fontFamily: 'sans-serif'
-      });
-      loadingOverlay.innerHTML = `
-        <div style="font-size: 3rem; margin-bottom: 20px; animation: bounce 1s infinite;">🎨</div>
-        <div style="font-weight: 800; font-size: 1.2rem;">FINALIZING...</div>
-        <div style="font-size: 0.9rem; color: #666; margin-top: 5px;">Memproses Frame & Foto HD</div>
-      `;
-      document.body.appendChild(loadingOverlay);
+      // 1. TENTUKAN UKURAN KANVAS ASLI (HD)
+      // Kita ambil ukuran dari frames.js, misal "400px" jadi 400
+      const targetWidth = parseFloat(selectedFrame.width || '320') * 3; // Kali 3 biar HD
+      const targetHeight = parseFloat(selectedFrame.height || '800') * 3;
 
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // 2. BIKIN KANVAS DI MEMORI (Gak perlu ditempel di DOM)
+      const canvas = document.createElement('canvas');
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const ctx = canvas.getContext('2d');
 
-      // 2. KLONING
-      const originalElement = stripRef.current;
-      clonedElement = originalElement.cloneNode(true);
-      const realWidth = selectedFrame.width || '320px'; 
-      const realHeight = selectedFrame.height || 'auto';
+      // Aktifkan antialiasing
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
 
-      Object.assign(clonedElement.style, {
-        position: 'fixed', top: '0', left: '0',                
-        width: realWidth, minWidth: realWidth, height: realHeight,       
-        transform: 'none', margin: '0',
-        padding: selectedFrame.isCustomPos ? '0' : '20px', 
-        backgroundColor: selectedFrame.style.backgroundColor || 'white',
-        zIndex: '99990', borderRadius: '0', visibility: 'visible'         
-      });
-      document.body.appendChild(clonedElement);
+      // 3. GAMBAR BACKGROUND WARNA (Kertas Dasarnya)
+      ctx.fillStyle = selectedFrame.style.backgroundColor || 'white';
+      ctx.fillRect(0, 0, targetWidth, targetHeight);
 
-      // --- [STEP 1: URUS FOTO USER] ---
-      const images = Array.from(clonedElement.getElementsByTagName('img'));
-      const photoPromises = images.map(async (img) => {
-        img.removeAttribute('crossOrigin'); 
-        img.removeAttribute('loading');
-        if (img.src.startsWith('blob:') || img.src.startsWith('http')) {
-            const base64 = await convertUrlToBase64(img.src);
-            img.src = base64;
+      // 4. GAMBAR FOTO USER (LAYER TENGAH)
+      // Kita loop foto-foto dan tempel manual
+      for (let i = 0; i < displayPhotos.length; i++) {
+        const photoSrc = displayPhotos[i];
+        const img = await loadImage(photoSrc); // Load foto user
+        const adj = photoAdjustments[i] || { zoom: 1, x: 0, y: 0, rotate: 0 };
+        
+        let x, y, w, h, r = 0;
+
+        // Hitung posisi berdasarkan jenis frame
+        if (selectedFrame.isCustomPos && selectedFrame.customPos[i]) {
+            // Frame Gambar (Custom Posisi)
+            const pos = selectedFrame.customPos[i];
+            x = parsePct(pos.left, targetWidth);
+            y = parsePct(pos.top, targetHeight);
+            w = parsePct(pos.width, targetWidth);
+            h = parsePct(pos.height, targetHeight);
+            r = parseFloat(pos.rotate || 0);
+        } else {
+            // Frame Polos (Stack Vertical)
+            // Padding hack simulasi (misal 20px dari kiri)
+            const padding = targetWidth * 0.05; // 5% padding
+            const availWidth = targetWidth - (padding * 2);
+            w = availWidth;
+            h = w * 0.75; // Aspect ratio 4:3
+            x = padding;
+            // Hitung Y (Padding atas + (tinggi + margin) * index)
+            const startY = padding; 
+            const margin = targetHeight * 0.02;
+            y = startY + (h + margin) * i;
         }
-        await new Promise((resolve) => {
-            if (img.complete) resolve();
-            else { img.onload = resolve; img.onerror = resolve; }
-        });
-      });
 
-      // --- [STEP 2: URUS FRAME BACKGROUND] ---
-      // Kita cari elemen yang punya background-image di dalam kloningan
-      const divs = Array.from(clonedElement.getElementsByTagName('div'));
-      const framePromises = divs.map(async (div) => {
-          const bgImage = div.style.backgroundImage;
-          if (bgImage && bgImage.includes('url')) {
-              const url = extractUrlFromCss(bgImage);
-              if (url) {
-                  // Download frame image manual
-                  const base64Frame = await convertUrlToBase64(url);
-                  // Timpa style background dengan base64
-                  div.style.backgroundImage = `url('${base64Frame}')`;
-              }
-          }
-      });
+        // --- PROSES DRAWING DENGAN TRANSFORMASI (ZOOM/GESER/PUTAR) ---
+        ctx.save();
+        
+        // 1. Bikin area kliping (biar foto gak keluar kotak slot)
+        // Kita pindah titik nol ke pusat slot foto biar muternya enak
+        const cx = x + w / 2;
+        const cy = y + h / 2;
+        ctx.translate(cx, cy);
+        ctx.rotate((r * Math.PI) / 180); // Putar slot frame (jika miring)
+        
+        // Bikin kotak path buat kliping
+        ctx.beginPath();
+        ctx.rect(-w / 2, -h / 2, w, h);
+        ctx.clip(); // Potong area gambar cuma di dalam kotak ini
 
-      // Tunggu semua (Foto + Frame) selesai diproses
-      await Promise.all([...photoPromises, ...framePromises]);
+        // 2. Terapkan Edit User (Zoom/Geser/Putar Foto)
+        // Geser foto (Adjust X/Y user harus diskalakan ke ukuran canvas HD)
+        const scaleMult = targetWidth / 320; // Multiplier biar geserannya pas di HD
+        ctx.translate(adj.x * scaleMult, adj.y * scaleMult);
+        ctx.scale(adj.zoom, adj.zoom);
+        ctx.rotate((adj.rotate * Math.PI) / 180);
 
-      // 3. ISTIRAHAT 2 DETIK (WAJIB BUAT HP)
-      await new Promise(resolve => setTimeout(resolve, 2000));
+        // 3. Draw Image (Center Crop Logic)
+        // Biar 'object-fit: cover' manual
+        const imgRatio = img.width / img.height;
+        const slotRatio = w / h;
+        let drawW, drawH;
+        
+        if (imgRatio > slotRatio) {
+            drawH = h;
+            drawW = h * imgRatio;
+        } else {
+            drawW = w;
+            drawH = w / imgRatio;
+        }
+        
+        // Apply Filter CSS (Terbatas di Canvas)
+        if (activeFilter !== 'none') {
+            // Canvas filter syntax mirip CSS
+            ctx.filter = activeFilter;
+        }
 
-      // 4. CAPTURE
-      const isSmallScreen = window.innerWidth < 768;
-      const dataUrl = await toPng(clonedElement, {
-        cacheBust: false, 
-        pixelRatio: isSmallScreen ? 2 : 3, 
-        quality: 1.0,
-        backgroundColor: null,
-        skipFonts: true,
-      });
+        ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+        
+        ctx.restore(); // Reset filter & transform buat foto berikutnya
+      }
 
-      // 5. DOWNLOAD
+      // 5. GAMBAR FRAME OVERLAY (PNG BOLONG-BOLONG)
+      if (selectedFrame.isImageFrame && selectedFrame.style.backgroundImage) {
+        // Ambil URL dari string `url("/images/...")`
+        const urlMatch = selectedFrame.style.backgroundImage.match(/url\(["']?([^"']*)["']?\)/);
+        if (urlMatch) {
+            const frameUrl = urlMatch[1];
+            const frameImg = await loadImage(frameUrl);
+            // Gambar frame menutupi seluruh kanvas
+            ctx.drawImage(frameImg, 0, 0, targetWidth, targetHeight);
+        }
+      }
+
+      // 6. GAMBAR TEKS "MEMORIA" (Kalo bukan frame gambar)
+      if (!selectedFrame.isImageFrame) {
+        ctx.save();
+        ctx.font = `900 ${targetWidth * 0.05}px sans-serif`; // Responsive font size
+        ctx.fillStyle = selectedFrame.textColor || '#333';
+        ctx.textAlign = 'center';
+        ctx.letterSpacing = '5px';
+        ctx.fillText("MEMORIA", targetWidth / 2, targetHeight - (targetHeight * 0.03));
+        ctx.restore();
+      }
+
+      // 7. EXPORT JADI PNG
+      const dataUrl = canvas.toDataURL('image/png', 1.0);
+
+      // 8. DOWNLOAD
       const link = document.createElement("a");
       link.download = `MEMORIA-${Date.now()}.png`;
       link.href = dataUrl;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      
+
       setTimeout(() => { setIsSaving(false); }, 1000);
 
     } catch (error) {
-      console.error("Gagal save:", error); 
+      console.error("Gagal Manual Render:", error); 
       setIsSaving(false); 
-      alert("Gagal menyimpan gambar. Coba refresh.");
-    } finally {
-      if (clonedElement && document.body.contains(clonedElement)) {
-        document.body.removeChild(clonedElement);
-      }
-      if (loadingOverlay && document.body.contains(loadingOverlay)) {
-        document.body.removeChild(loadingOverlay);
-      }
+      alert("Gagal menyimpan. Coba refresh browser.");
     }
   };
 
@@ -258,6 +287,7 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
               border: selectedFrame.isImageFrame ? 'none' : '10px solid white',
             }}>
             
+            {/* INI CUMA BUAT DISPLAY DI LAYAR (HTML) */}
             {displayPhotos.map((pic, i) => {
               const pos = selectedFrame.customPos ? selectedFrame.customPos[i] : null;
               const adj = photoAdjustments[i] || { zoom: 1, x: 0, y: 0, rotate: 0 }; 
@@ -297,17 +327,8 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
               );
             })}
 
-            {/* --- FRAME IMAGE RENDER --- */}
             {selectedFrame.isImageFrame && (
-              <div 
-                // KITA KASIH CLASS BIAR BISA DITANGKEP SAMA CODE DOWNLOAD DI ATAS
-                className="frame-bg-layer"
-                style={{ 
-                  position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', 
-                  backgroundImage: selectedFrame.style.backgroundImage, 
-                  backgroundSize: '100% 100%', pointerEvents: 'none', zIndex: 20 
-                }} 
-              />
+              <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundImage: selectedFrame.style.backgroundImage, backgroundSize: '100% 100%', pointerEvents: 'none', zIndex: 20 }} />
             )}
 
             {selectedFrame.stickers && selectedFrame.stickers.map((stk, idx) => {
@@ -400,7 +421,6 @@ const Result = ({ photos, selectedFrame, onRetake, onFinish, onRetakeSingle }) =
       <style>{`
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { 100% { transform: rotate(360deg); } }
-        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #ddd; borderRadius: 3px; }
