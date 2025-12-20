@@ -20,7 +20,7 @@ const Home = ({ onStart }) => {
               <img key={i} src={url} className="strip-img" alt="sample" />
             ))}
             <div style={{textAlign:'center', fontWeight:'900', fontSize:'0.8rem', color:'var(--geo-navy)', marginTop: '5px'}}>
-              PHOTOISM
+              MEMORIA
             </div>
           </div>
         </div>

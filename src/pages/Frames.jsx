@@ -178,7 +178,7 @@ const Frames = ({ selectedCount, onSelectFrame, onBack }) => {
                       textAlign:'center', fontSize:'0.3rem', fontWeight:'900', marginTop:'2px', 
                       letterSpacing:'1px', color: frame.textColor, width: '100%', position: 'absolute', bottom: '5px'
                     }}>
-                      PHOTOISM
+                      MEMORIA
                     </div>
                   )}
                 </div>

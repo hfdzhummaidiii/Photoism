@@ -5,7 +5,7 @@ const Navbar = ({ goHome }) => {
     <div className="geo-header">
       <div className="geo-logo">
         <div className="geo-logo-icon"></div>
-        PHOTOISM.
+        MEMORIA.
       </div>
       <div className="geo-nav">
         <span onClick={goHome}>Home</span>
